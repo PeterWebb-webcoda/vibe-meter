@@ -15,6 +15,9 @@ public class SettingsData
     public bool LaunchAtStartup { get; set; } = false;
     public bool AlwaysOnTop { get; set; } = true;
 
+    /// <summary>Show the widget as a slim horizontal strip instead of the full panel.</summary>
+    public bool CompactMode { get; set; } = false;
+
     /// <summary>Per-provider enable flags, keyed by provider Id. Absent = enabled.</summary>
     public Dictionary<string, bool> ProviderEnabled { get; set; } = new();
 

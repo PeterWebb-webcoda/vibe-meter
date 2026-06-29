@@ -8,22 +8,22 @@
         xmlns:models="clr-namespace:VibeMeter.Models"
         mc:Ignorable="d"
         Title="Vibe Meter"
-        Height="780" Width="420"
-        MinHeight="460" MinWidth="380"
         WindowStyle="None"
         AllowsTransparency="True"
         Background="Transparent"
-        ResizeMode="CanResizeWithGrip"
-        Topmost="{Binding AlwaysOnTop}"
         ShowInTaskbar="False"
+        Topmost="{Binding AlwaysOnTop}"
         Loaded="Window_Loaded"
         MouseLeftButtonDown="Window_MouseLeftButtonDown">
 
+    <!-- All sizing is managed in code-behind (ApplyCompactLayout). -->
+
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
+        <local:PercentToWidthConverter x:Key="PctToWidth" />
 
         <DataTemplate x:Key="CircularMeterTemplate" DataType="{x:Type models:UsageGaugeData}">
-            <local:CircularMeter Gauge="{Binding}" Margin="4,2"/>
+            <local:CircularMeter Gauge="{Binding}" Margin="0,2"/>
         </DataTemplate>
         <DataTemplate x:Key="HorizontalMeterTemplate" DataType="{x:Type models:UsageGaugeData}">
             <local:BarMeter Gauge="{Binding}" Margin="0,4"/>
@@ -61,174 +61,311 @@
                 </Setter.Value>
             </Setter>
         </Style>
+
+        <Style x:Key="MicroButtonStyle" TargetType="Button">
+            <Setter Property="Background" Value="#30FFFFFF"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Width" Value="24"/>
+            <Setter Property="Height" Value="24"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="{TemplateBinding Background}" CornerRadius="6">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Background" Value="#50FFFFFF"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter Property="Background" Value="#20FFFFFF"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- One compact cell in the micro-bar: provider label + 5h/weekly sections with reset countdown. -->
+        <DataTemplate x:Key="CompactCellTemplate" DataType="{x:Type vm:ProviderViewModel}">
+            <Border Margin="2,0" Padding="6,2" CornerRadius="6" Background="#10FFFFFF"
+                    VerticalAlignment="Center"
+                    Visibility="{Binding HasGauges, Converter={StaticResource BoolToVis}}">
+                <StackPanel>
+                    <!-- Provider short name -->
+                    <DockPanel Margin="0,0,0,2">
+                        <Ellipse Width="6" Height="6" Fill="{Binding AccentBrush}"
+                                 DockPanel.Dock="Left" Margin="0,0,4,0" VerticalAlignment="Center"/>
+                        <TextBlock Text="{Binding ShortName}"
+                                   FontSize="9" Foreground="#80FFFFFF" VerticalAlignment="Center"/>
+                    </DockPanel>
+
+                    <!-- Two gauge sections side by side -->
+                    <StackPanel Orientation="Horizontal">
+                        <!-- 5h section -->
+                        <StackPanel Width="52" Margin="0,0,4,0">
+                            <DockPanel>
+                                <TextBlock Text="5h" FontSize="8" Foreground="#60FFFFFF"
+                                           DockPanel.Dock="Left" VerticalAlignment="Center"/>
+                                <TextBlock Text="{Binding FiveHourReset}" FontSize="7"
+                                           Foreground="#40FFFFFF" HorizontalAlignment="Right"
+                                           VerticalAlignment="Center"/>
+                            </DockPanel>
+                            <Grid Height="3" Margin="0,1,0,0">
+                                <Border Background="#20FFFFFF" CornerRadius="1.5"/>
+                                <Border Background="{Binding AccentBrush}" CornerRadius="1.5"
+                                        HorizontalAlignment="Left"
+                                        Width="{Binding FiveHourPercent, Converter={StaticResource PctToWidth}, ConverterParameter=52}"/>
+                            </Grid>
+                        </StackPanel>
+
+                        <!-- Weekly section -->
+                        <StackPanel Width="52">
+                            <DockPanel>
+                                <TextBlock Text="Wk" FontSize="8" Foreground="#60FFFFFF"
+                                           DockPanel.Dock="Left" VerticalAlignment="Center"/>
+                                <TextBlock Text="{Binding WeeklyReset}" FontSize="7"
+                                           Foreground="#40FFFFFF" HorizontalAlignment="Right"
+                                           VerticalAlignment="Center"/>
+                            </DockPanel>
+                            <Grid Height="3" Margin="0,1,0,0">
+                                <Border Background="#20FFFFFF" CornerRadius="1.5"/>
+                                <Border Background="{Binding AccentBrush}" CornerRadius="1.5"
+                                        HorizontalAlignment="Left"
+                                        Width="{Binding WeeklyPercent, Converter={StaticResource PctToWidth}, ConverterParameter=52}"
+                                        Opacity="0.7"/>
+                            </Grid>
+                        </StackPanel>
+                    </StackPanel>
+                </StackPanel>
+            </Border>
+        </DataTemplate>
     </Window.Resources>
 
-    <Border CornerRadius="26"
-            Background="{StaticResource PanelBackground}"
-            BorderBrush="{StaticResource BorderBrush}"
-            BorderThickness="1">
+    <Grid>
+        <!-- ============ FULL PANEL ============ -->
+        <Border CornerRadius="26"
+                Background="{StaticResource PanelBackground}"
+                BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="1">
+            <Border.Style>
+                <Style TargetType="Border">
+                    <Setter Property="Visibility" Value="Visible"/>
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding CompactMode}" Value="True">
+                            <Setter Property="Visibility" Value="Collapsed"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Border.Style>
 
-        <DockPanel Margin="16">
+            <DockPanel Margin="16">
 
-            <!-- Header -->
-            <DockPanel DockPanel.Dock="Top" Margin="0,0,0,12">
-                <StackPanel DockPanel.Dock="Left" VerticalAlignment="Center">
-                    <TextBlock Text="Vibe Meter"
-                               FontSize="20" FontWeight="SemiBold"
-                               Foreground="{StaticResource PrimaryText}"/>
-                    <TextBlock Text="AI usage across Codex, Claude &amp; Z.ai"
-                               FontSize="11"
-                               Foreground="{StaticResource SecondaryText}"/>
-                </StackPanel>
+                <!-- Header -->
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,12">
+                    <StackPanel DockPanel.Dock="Left" VerticalAlignment="Center">
+                        <TextBlock Text="Vibe Meter"
+                                   FontSize="20" FontWeight="SemiBold"
+                                   Foreground="{StaticResource PrimaryText}"/>
+                        <TextBlock Text="AI usage across Codex, Claude &amp; Z.ai"
+                                   FontSize="11"
+                                   Foreground="{StaticResource SecondaryText}"/>
+                    </StackPanel>
 
-                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
-                    <Button Style="{StaticResource IconButtonStyle}"
-                            Command="{Binding RefreshCommand}"
-                            ToolTip="Refresh" Margin="0,0,8,0">
-                        <TextBlock Text="↻" FontSize="16" FontFamily="Segoe UI Symbol"/>
-                    </Button>
-                    <Button Style="{StaticResource IconButtonStyle}"
-                            Click="ResetPositionButton_Click"
-                            ToolTip="Reset Position" Margin="0,0,8,0">
-                        <TextBlock Text="⊞" FontSize="16" FontFamily="Segoe UI Symbol"/>
-                    </Button>
-                    <Button Style="{StaticResource IconButtonStyle}"
-                            Click="SettingsButton_Click"
-                            ToolTip="Settings" Margin="0,0,8,0">
-                        <TextBlock Text="⚙" FontSize="16" FontFamily="Segoe UI Symbol"/>
-                    </Button>
-                    <Button Style="{StaticResource IconButtonStyle}"
-                            Click="HideButton_Click"
-                            ToolTip="Hide">
-                        <TextBlock Text="✕" FontSize="14" FontFamily="Segoe UI Symbol"/>
-                    </Button>
-                </StackPanel>
-            </DockPanel>
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
+                        <Button Style="{StaticResource IconButtonStyle}"
+                                Command="{Binding RefreshCommand}"
+                                ToolTip="Refresh" Margin="0,0,8,0">
+                            <TextBlock Text="↻" FontSize="16" FontFamily="Segoe UI Symbol"/>
+                        </Button>
+                        <Button Style="{StaticResource IconButtonStyle}"
+                                Click="ResetPositionButton_Click"
+                                ToolTip="Reset Position" Margin="0,0,8,0">
+                            <TextBlock Text="⊞" FontSize="16" FontFamily="Segoe UI Symbol"/>
+                        </Button>
+                        <Button Style="{StaticResource IconButtonStyle}"
+                                Command="{Binding ToggleCompactCommand}"
+                                ToolTip="Compact mode" Margin="0,0,8,0">
+                            <TextBlock Text="▭" FontSize="13" FontFamily="Segoe UI Symbol"/>
+                        </Button>
+                        <Button Style="{StaticResource IconButtonStyle}"
+                                Click="SettingsButton_Click"
+                                ToolTip="Settings" Margin="0,0,8,0">
+                            <TextBlock Text="⚙" FontSize="16" FontFamily="Segoe UI Symbol"/>
+                        </Button>
+                        <Button Style="{StaticResource IconButtonStyle}"
+                                Click="HideButton_Click"
+                                ToolTip="Hide">
+                            <TextBlock Text="✕" FontSize="14" FontFamily="Segoe UI Symbol"/>
+                        </Button>
+                    </StackPanel>
+                </DockPanel>
 
-            <!-- Footer -->
-            <DockPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                    <Button Command="{Binding CycleTintCommand}"
-                            Background="Transparent" BorderThickness="0"
-                            Cursor="Hand">
-                        <Button.Template>
-                            <ControlTemplate TargetType="Button">
-                                <StackPanel Orientation="Horizontal" Background="Transparent">
-                                    <Ellipse Width="8" Height="8" Fill="{Binding TintPrimaryBrush}" Margin="0,0,6,0"/>
-                                    <TextBlock Text="{Binding CurrentTint.Name}"
-                                               FontSize="11" Foreground="{StaticResource SecondaryText}"/>
-                                </StackPanel>
-                            </ControlTemplate>
-                        </Button.Template>
-                    </Button>
-                    <TextBlock Text=" · " Foreground="{StaticResource SecondaryText}" FontSize="11"/>
-                    <TextBlock Text="{Binding StatusMessage}"
-                               FontSize="11" Foreground="{StaticResource SecondaryText}"/>
-                </StackPanel>
-            </DockPanel>
+                <!-- Footer -->
+                <DockPanel DockPanel.Dock="Bottom" Margin="0,12,0,0">
+                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                        <Button Command="{Binding CycleTintCommand}"
+                                Background="Transparent" BorderThickness="0"
+                                Cursor="Hand">
+                            <Button.Template>
+                                <ControlTemplate TargetType="Button">
+                                    <StackPanel Orientation="Horizontal" Background="Transparent">
+                                        <Ellipse Width="8" Height="8" Fill="{Binding TintPrimaryBrush}" Margin="0,0,6,0"/>
+                                        <TextBlock Text="{Binding CurrentTint.Name}"
+                                                   FontSize="11" Foreground="{StaticResource SecondaryText}"/>
+                                    </StackPanel>
+                                </ControlTemplate>
+                            </Button.Template>
+                        </Button>
+                        <TextBlock Text=" · " Foreground="{StaticResource SecondaryText}" FontSize="11"/>
+                        <TextBlock Text="{Binding StatusMessage}"
+                                   FontSize="11" Foreground="{StaticResource SecondaryText}"/>
+                    </StackPanel>
+                </DockPanel>
 
-            <!-- Provider cards -->
-            <ScrollViewer VerticalScrollBarVisibility="Auto">
-                <ItemsControl ItemsSource="{Binding Providers}">
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate DataType="{x:Type vm:ProviderViewModel}">
-                            <Border CornerRadius="12" Background="#18FFFFFF"
-                                    Padding="14" Margin="0,0,0,12">
+                <!-- Provider cards -->
+                <ScrollViewer VerticalScrollBarVisibility="Auto">
+                    <ItemsControl ItemsSource="{Binding Providers}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type vm:ProviderViewModel}">
+                                <Border CornerRadius="12" Background="#18FFFFFF"
+                                        Padding="14" Margin="0,0,0,12">
 
-                                <StackPanel>
-                                    <!-- Card header -->
-                                    <DockPanel Margin="0,0,0,10">
-                                        <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
-                                            <Ellipse Width="10" Height="10"
-                                                     Fill="{Binding AccentBrush}" Margin="0,0,8,0"/>
-                                            <TextBlock Text="{Binding DisplayName}"
-                                                       FontSize="15" FontWeight="SemiBold"
-                                                       Foreground="{StaticResource PrimaryText}"/>
-                                        </StackPanel>
-
-                                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
-                                            <!-- Plan badge -->
-                                            <Border Background="#20FFFFFF" CornerRadius="10" Padding="8,2" Margin="0,0,8,0">
-                                                <Border.Style>
-                                                    <Style TargetType="Border">
-                                                        <Setter Property="Visibility" Value="Visible"/>
-                                                        <Style.Triggers>
-                                                            <DataTrigger Binding="{Binding PlanLabel}" Value="{x:Null}">
-                                                                <Setter Property="Visibility" Value="Collapsed"/>
-                                                            </DataTrigger>
-                                                            <DataTrigger Binding="{Binding PlanLabel}" Value="">
-                                                                <Setter Property="Visibility" Value="Collapsed"/>
-                                                            </DataTrigger>
-                                                        </Style.Triggers>
-                                                    </Style>
-                                                </Border.Style>
-                                                <TextBlock Text="{Binding PlanLabel}" FontSize="10"
+                                    <StackPanel>
+                                        <!-- Card header -->
+                                        <DockPanel Margin="0,0,0,10">
+                                            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                                                <Ellipse Width="10" Height="10"
+                                                         Fill="{Binding AccentBrush}" Margin="0,0,8,0"/>
+                                                <TextBlock Text="{Binding DisplayName}"
+                                                           FontSize="15" FontWeight="SemiBold"
                                                            Foreground="{StaticResource PrimaryText}"/>
-                                            </Border>
+                                            </StackPanel>
 
-                                            <!-- Available-credits badge -->
-                                            <Border Background="#3040C873" CornerRadius="10" Padding="8,2"
-                                                    Visibility="{Binding ShowResetBank, Converter={StaticResource BoolToVis}}">
-                                                <StackPanel Orientation="Horizontal">
-                                                    <TextBlock Text="{Binding AvailableCount}" FontSize="10"
-                                                               Foreground="#40C873" FontWeight="SemiBold"/>
-                                                    <TextBlock Text=" available" FontSize="10" Foreground="#40C873"/>
-                                                </StackPanel>
-                                            </Border>
-                                        </StackPanel>
-                                    </DockPanel>
+                                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
+                                                <!-- Plan badge -->
+                                                <Border Background="#20FFFFFF" CornerRadius="10" Padding="8,2" Margin="0,0,8,0">
+                                                    <Border.Style>
+                                                        <Style TargetType="Border">
+                                                            <Setter Property="Visibility" Value="Visible"/>
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding PlanLabel}" Value="{x:Null}">
+                                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding PlanLabel}" Value="">
+                                                                    <Setter Property="Visibility" Value="Collapsed"/>
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </Border.Style>
+                                                    <TextBlock Text="{Binding PlanLabel}" FontSize="10"
+                                                               Foreground="{StaticResource PrimaryText}"/>
+                                                </Border>
 
-                                    <!-- Gauges -->
-                                    <ItemsControl ItemsSource="{Binding Gauges}"
-                                                  ItemTemplateSelector="{StaticResource MeterTemplateSelector}">
-                                        <ItemsControl.ItemsPanel>
-                                            <ItemsPanelTemplate>
-                                                <WrapPanel Orientation="Horizontal" HorizontalAlignment="Center"/>
-                                            </ItemsPanelTemplate>
-                                        </ItemsControl.ItemsPanel>
-                                    </ItemsControl>
+                                                <!-- Available-credits badge -->
+                                                <Border Background="#3040C873" CornerRadius="10" Padding="8,2"
+                                                        Visibility="{Binding ShowResetBank, Converter={StaticResource BoolToVis}}">
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <TextBlock Text="{Binding AvailableCount}" FontSize="10"
+                                                                   Foreground="#40C873" FontWeight="SemiBold"/>
+                                                        <TextBlock Text=" available" FontSize="10" Foreground="#40C873"/>
+                                                    </StackPanel>
+                                                </Border>
+                                            </StackPanel>
+                                        </DockPanel>
 
-                                    <!-- Reset note -->
-                                    <TextBlock Text="{Binding ResetNote}"
-                                               FontSize="11" Foreground="{StaticResource SecondaryText}"
-                                               HorizontalAlignment="Center" Margin="0,8,0,0">
-                                        <TextBlock.Style>
-                                            <Style TargetType="TextBlock">
-                                                <Setter Property="Visibility" Value="Visible"/>
-                                                <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding ResetNote}" Value="{x:Null}">
-                                                        <Setter Property="Visibility" Value="Collapsed"/>
-                                                    </DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </TextBlock.Style>
-                                    </TextBlock>
+                                        <!-- Gauges -->
+                                        <ItemsControl ItemsSource="{Binding Gauges}"
+                                                      ItemTemplateSelector="{StaticResource MeterTemplateSelector}">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <WrapPanel Orientation="Horizontal" HorizontalAlignment="Center"/>
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                        </ItemsControl>
 
-                                    <!-- Not configured -->
-                                    <Border Background="#20FFFFFF" CornerRadius="8" Padding="10" Margin="0,8,0,0"
-                                            Visibility="{Binding ShowNotConfigured, Converter={StaticResource BoolToVis}}">
-                                        <TextBlock Text="{Binding ErrorMessage}" FontSize="11"
-                                                   Foreground="{StaticResource SecondaryText}" TextWrapping="Wrap"/>
-                                    </Border>
+                                        <!-- Reset note -->
+                                        <TextBlock Text="{Binding ResetNote}"
+                                                   FontSize="11" Foreground="{StaticResource SecondaryText}"
+                                                   HorizontalAlignment="Center" Margin="0,8,0,0">
+                                            <TextBlock.Style>
+                                                <Style TargetType="TextBlock">
+                                                    <Setter Property="Visibility" Value="Visible"/>
+                                                    <Style.Triggers>
+                                                        <DataTrigger Binding="{Binding ResetNote}" Value="{x:Null}">
+                                                            <Setter Property="Visibility" Value="Collapsed"/>
+                                                        </DataTrigger>
+                                                    </Style.Triggers>
+                                                </Style>
+                                            </TextBlock.Style>
+                                        </TextBlock>
 
-                                    <!-- Error -->
-                                    <Border Background="#30482020" CornerRadius="8" Padding="10" Margin="0,8,0,0"
-                                            Visibility="{Binding ShowError, Converter={StaticResource BoolToVis}}">
-                                        <TextBlock Text="{Binding ErrorMessage}" FontSize="11"
-                                                   Foreground="#F04840" TextWrapping="Wrap"/>
-                                    </Border>
+                                        <!-- Not configured -->
+                                        <Border Background="#20FFFFFF" CornerRadius="8" Padding="10" Margin="0,8,0,0"
+                                                Visibility="{Binding ShowNotConfigured, Converter={StaticResource BoolToVis}}">
+                                            <TextBlock Text="{Binding ErrorMessage}" FontSize="11"
+                                                       Foreground="{StaticResource SecondaryText}" TextWrapping="Wrap"/>
+                                        </Border>
 
-                                    <!-- Status line -->
-                                    <TextBlock Text="{Binding StatusText}"
-                                               FontSize="10" Foreground="{StaticResource SecondaryText}"
-                                               HorizontalAlignment="Right" Margin="0,6,0,0"/>
-                                </StackPanel>
-                            </Border>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
+                                        <!-- Error -->
+                                        <Border Background="#30482020" CornerRadius="8" Padding="10" Margin="0,8,0,0"
+                                                Visibility="{Binding ShowError, Converter={StaticResource BoolToVis}}">
+                                            <TextBlock Text="{Binding ErrorMessage}" FontSize="11"
+                                                       Foreground="#F04840" TextWrapping="Wrap"/>
+                                        </Border>
+
+                                        <!-- Status line -->
+                                        <TextBlock Text="{Binding StatusText}"
+                                                   FontSize="10" Foreground="{StaticResource SecondaryText}"
+                                                   HorizontalAlignment="Right" Margin="0,6,0,0"/>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+
+            </DockPanel>
+        </Border>
+
+        <!-- ============ COMPACT MICRO-BAR ============ -->
+        <Border CornerRadius="14"
+                Background="{StaticResource PanelBackground}"
+                BorderBrush="{StaticResource BorderBrush}"
+                BorderThickness="1"
+                Padding="8,6">
+            <Border.Style>
+                <Style TargetType="Border">
+                    <Setter Property="Visibility" Value="Collapsed"/>
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding CompactMode}" Value="True">
+                            <Setter Property="Visibility" Value="Visible"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </Border.Style>
+
+            <DockPanel>
+                <Button DockPanel.Dock="Right"
+                        Style="{StaticResource MicroButtonStyle}"
+                        Command="{Binding ToggleCompactCommand}"
+                        ToolTip="Expand"
+                        VerticalAlignment="Center"
+                        Margin="8,0,0,0">
+                    <TextBlock Text="⤢" FontSize="13" FontFamily="Segoe UI Symbol" Foreground="White"/>
+                </Button>
+
+                <ItemsControl ItemsSource="{Binding Providers}"
+                              ItemTemplate="{StaticResource CompactCellTemplate}"
+                              VerticalAlignment="Center">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Orientation="Horizontal"/>
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
                 </ItemsControl>
-            </ScrollViewer>
-
-        </DockPanel>
-    </Border>
+            </DockPanel>
+        </Border>
+    </Grid>
 </Window>

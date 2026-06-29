@@ -56,6 +56,24 @@ public partial class App : Application
         var resetPosItem = new MenuItem { Header = "Reset Position" };
         resetPosItem.Click += (s, args) => _mainWindow.ResetPosition();
 
+        // Compact mode mirrors (and persists) MainViewModel.CompactMode.
+        var compactItem = new MenuItem { Header = "Compact mode", IsCheckable = true, IsChecked = _mainViewModel.CompactMode };
+        compactItem.Checked += (s, args) =>
+        {
+            _mainViewModel.CompactMode = true;
+            _mainViewModel.SaveSettings();
+        };
+        compactItem.Unchecked += (s, args) =>
+        {
+            _mainViewModel.CompactMode = false;
+            _mainViewModel.SaveSettings();
+        };
+        _mainViewModel.PropertyChanged += (s, args) =>
+        {
+            if (args.PropertyName == nameof(MainViewModel.CompactMode))
+                compactItem.IsChecked = _mainViewModel.CompactMode;
+        };
+
         var settingsItem = new MenuItem { Header = "Settings" };
         settingsItem.Click += (s, args) => ShowSettings();
 
@@ -65,6 +83,7 @@ public partial class App : Application
         contextMenu.Items.Add(refreshItem);
         contextMenu.Items.Add(toggleItem);
         contextMenu.Items.Add(resetPosItem);
+        contextMenu.Items.Add(compactItem);
         contextMenu.Items.Add(new Separator());
         contextMenu.Items.Add(settingsItem);
         contextMenu.Items.Add(new Separator());

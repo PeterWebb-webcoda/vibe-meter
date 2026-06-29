@@ -39,6 +39,9 @@ public partial class MainViewModel : ObservableObject
 
     [ObservableProperty] private string _freshnessText = "";
 
+    /// <summary>When true, the window renders as a slim horizontal strip instead of the full panel.</summary>
+    [ObservableProperty] private bool _compactMode;
+
     public WidgetTint CurrentTint => WidgetTint.All[TintIndex % WidgetTint.All.Count];
     public SolidColorBrush TintPrimaryBrush => new(CurrentTint.Primary);
     public SolidColorBrush TintSecondaryBrush => new(CurrentTint.Secondary);
@@ -119,6 +122,14 @@ public partial class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(TintGlowBrush));
     }
 
+    [RelayCommand]
+    public void ToggleCompact()
+    {
+        CompactMode = !CompactMode;
+        _settings.CompactMode = CompactMode;
+        _settingsService.Save(_settings);
+    }
+
     public void SaveSettings()
     {
         _settings.TintIndex = TintIndex;
@@ -126,6 +137,7 @@ public partial class MainViewModel : ObservableObject
         _settings.RefreshIntervalSeconds = RefreshIntervalSeconds;
         _settings.MeterStyleName = MeterStyle.ToString();
         _settings.AlwaysOnTop = AlwaysOnTop;
+        _settings.CompactMode = CompactMode;
         _settingsService.Save(_settings);
     }
 
@@ -137,6 +149,7 @@ public partial class MainViewModel : ObservableObject
         AutoRefreshEnabled = settings.AutoRefreshEnabled;
         RefreshIntervalSeconds = settings.RefreshIntervalSeconds;
         AlwaysOnTop = settings.AlwaysOnTop;
+        CompactMode = settings.CompactMode;
         if (Enum.TryParse<MeterStyle>(settings.MeterStyleName, out var style))
             MeterStyle = style;
     }

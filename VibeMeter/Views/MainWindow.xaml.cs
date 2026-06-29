@@ -1,3 +1,4 @@
+using System.ComponentModel;
 using System.Windows;
 using System.Windows.Input;
 using VibeMeter.ViewModels;
@@ -6,6 +7,9 @@ namespace VibeMeter.Views;
 
 public partial class MainWindow : Window
 {
+    private const double FullWidth = 420;
+    private const double FullHeight = 780;
+
     private readonly MainViewModel _viewModel;
 
     public MainWindow(MainViewModel viewModel)
@@ -13,11 +17,50 @@ public partial class MainWindow : Window
         InitializeComponent();
         _viewModel = viewModel;
         DataContext = viewModel;
+
+        _viewModel.PropertyChanged += ViewModel_PropertyChanged;
+
+        ApplyCompactLayout(_viewModel.CompactMode);
     }
 
     private void Window_Loaded(object sender, RoutedEventArgs e)
     {
+        ApplyCompactLayout(_viewModel.CompactMode);
         ResetPosition();
+    }
+
+    private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
+    {
+        if (e.PropertyName == nameof(MainViewModel.CompactMode))
+        {
+            ApplyCompactLayout(_viewModel.CompactMode);
+        }
+    }
+
+    private void ApplyCompactLayout(bool compact)
+    {
+        ClearValue(WidthProperty);
+        ClearValue(HeightProperty);
+        ClearValue(MinWidthProperty);
+        ClearValue(MinHeightProperty);
+
+        if (compact)
+        {
+            ResizeMode = ResizeMode.NoResize;
+            SizeToContent = SizeToContent.WidthAndHeight;
+        }
+        else
+        {
+            SizeToContent = SizeToContent.Manual;
+            MinWidth = 380;
+            MinHeight = 460;
+            ResizeMode = ResizeMode.CanResizeWithGrip;
+            Width = FullWidth;
+            Height = FullHeight;
+        }
+
+        if (IsLoaded)
+            ResetPosition();
     }
 
     private void Window_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
@@ -31,9 +74,8 @@ public partial class MainWindow : Window
     public void ResetPosition()
     {
         var workArea = SystemParameters.WorkArea;
-        // Bottom-right with 18px margin.
-        Left = workArea.Right - Width - 18;
-        Top = workArea.Bottom - Height - 18;
+        Left = workArea.Right - ActualWidth - 18;
+        Top = workArea.Bottom - ActualHeight - 18;
     }
 
     private void ResetPositionButton_Click(object sender, RoutedEventArgs e) => ResetPosition();

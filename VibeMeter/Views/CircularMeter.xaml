@@ -6,10 +6,19 @@
         <StackPanel HorizontalAlignment="Center">
             <!-- Circular gauge -->
             <Canvas Width="70" Height="70" HorizontalAlignment="Center">
+                <!-- Outer Usage Gauge -->
                 <Ellipse Width="70" Height="70"
                          Stroke="#19FFFFFF" StrokeThickness="8"
                          Fill="Transparent" />
                 <Path x:Name="ArcPath" StrokeThickness="8" Fill="Transparent" />
+
+                <!-- Inner Reset Countdown Gauge -->
+                <Ellipse x:Name="ResetTrack" Width="47" Height="47"
+                         Canvas.Left="11.5" Canvas.Top="11.5"
+                         Stroke="#0DFFFFFF" StrokeThickness="2.5"
+                         Fill="Transparent" Visibility="Collapsed" />
+                <Path x:Name="ResetArcPath" StrokeThickness="2.5" Fill="Transparent"
+                      Visibility="Collapsed" />
             </Canvas>
 
             <Grid Margin="0,-70,0,0" Width="70" Height="70" HorizontalAlignment="Center">

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Windows.Media;
@@ -24,6 +25,24 @@ public sealed partial class ProviderViewModel : ObservableObject
     [ObservableProperty] private string? _resetNote;
     [ObservableProperty] private string _statusText = "";
     [ObservableProperty] private DateTime? _lastFetched;
+
+    /// <summary>Remaining % of the primary (first) gauge — drives the compact micro-bar.</summary>
+    [ObservableProperty] private int _primaryPercent;
+
+    /// <summary>Short provider name for the compact bar.</summary>
+    public string ShortName => Id switch
+    {
+        "codex"  => "Codex",
+        "claude" => "Claude",
+        "zai"    => "Z.ai",
+        "google" => "Google",
+        _        => DisplayName
+    };
+
+    [ObservableProperty] private int _fiveHourPercent;
+    [ObservableProperty] private string _fiveHourReset = "";
+    [ObservableProperty] private int _weeklyPercent;
+    [ObservableProperty] private string _weeklyReset = "";
 
     public ObservableCollection<UsageGaugeData> Gauges { get; } = new();
 
@@ -67,11 +86,51 @@ public sealed partial class ProviderViewModel : ObservableObject
         ResetNote = usage.ResetNote;
         LastFetched = usage.FetchedAt;
         StatusText = DeriveStatusText(usage);
+        PrimaryPercent = Gauges.Count > 0 ? Gauges[0].Percent : 0;
+        PopulateCompactGauges(usage.Gauges);
 
         OnPropertyChanged(nameof(HasGauges));
         OnPropertyChanged(nameof(ShowNotConfigured));
         OnPropertyChanged(nameof(ShowError));
         OnPropertyChanged(nameof(ShowResetBank));
+    }
+
+    private void PopulateCompactGauges(IReadOnlyList<UsageGauge> gauges)
+    {
+        UsageGauge? fiveH = null;
+        UsageGauge? weekly = null;
+
+        foreach (var g in gauges)
+        {
+            var lower = g.Title.ToLowerInvariant();
+            if (lower.Contains("5h") || lower.Contains("5-hour") || lower.Contains("primary"))
+                fiveH ??= g;
+            else if (lower.Contains("week") || lower.Contains("month"))
+                weekly ??= g;
+        }
+
+        fiveH ??= gauges.Count > 0 ? gauges[0] : null;
+        weekly ??= gauges.Count > 1 ? gauges[1] : null;
+
+        FiveHourPercent = fiveH?.PercentRemaining ?? 0;
+        FiveHourReset = FormatShortCountdown(fiveH?.ResetAt);
+        WeeklyPercent = weekly?.PercentRemaining ?? 0;
+        WeeklyReset = FormatShortCountdown(weekly?.ResetAt);
+    }
+
+    private static string FormatShortCountdown(DateTime? resetAt)
+    {
+        if (!resetAt.HasValue) return "";
+        var span = resetAt.Value - DateTime.Now;
+        if (span.TotalSeconds <= 0) return "now";
+        if (span.TotalMinutes < 60) return $"{(int)span.TotalMinutes}m";
+        if (span.TotalHours < 24)
+        {
+            var h = span.TotalHours;
+            return h >= 10 ? $"{(int)h}h" : $"{h:0.#}h";
+        }
+        var d = span.TotalDays;
+        return d >= 10 ? $"{(int)d}d" : $"{d:0.#}d";
     }
 
     private static string DeriveStatusText(ProviderUsage usage) => usage.State switch

@@ -124,6 +124,20 @@ public sealed class ZaiProvider : IUsageProvider
                 }
             }
 
+            // Ensure gauges are ordered consistently: 5h first, weekly second, monthly third.
+            gauges.Sort((a, b) =>
+            {
+                var order = new Dictionary<string, int>
+                {
+                    { "5h", 1 },
+                    { "weekly", 2 },
+                    { "monthly", 3 }
+                };
+                int aOrd = order.TryGetValue(a.Id, out var ao) ? ao : 99;
+                int bOrd = order.TryGetValue(b.Id, out var bo) ? bo : 99;
+                return aOrd.CompareTo(bOrd);
+            });
+
             return new ProviderUsage
             {
                 ProviderId = Id,

@@ -52,6 +52,7 @@ Desktop.ini
 images/
 temp/
 publish/
+*.zip
 
 ## Local AI-tooling configs (Webcoda-internal, not part of the app)
 .claude/

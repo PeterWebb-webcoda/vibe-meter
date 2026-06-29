@@ -71,7 +71,7 @@ public class CodexUsageWindow
             {
                 if (element.ValueKind == System.Text.Json.JsonValueKind.Number && element.TryGetDouble(out double timestamp))
                 {
-                    return DateTimeOffset.FromUnixTimeSeconds((long)timestamp).UtcDateTime;
+                    return DateTimeOffset.FromUnixTimeSeconds((long)timestamp).LocalDateTime;
                 }
                 if (element.ValueKind == System.Text.Json.JsonValueKind.String && DateTime.TryParse(element.GetString(), out DateTime date))
                 {
