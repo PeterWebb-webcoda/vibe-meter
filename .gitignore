@@ -1,0 +1,62 @@
+## .NET / Visual Studio
+bin/
+obj/
+*.user
+*.suo
+*.userprefs
+*.cache
+*.log
+
+## Build results
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+[Aa][Rr][Mm]/
+[Aa][Rr][Mm]64/
+bld/
+[Bb]in/
+[Oo]bj/
+[Ll]og/
+[Ll]ogs/
+
+## NuGet
+*.nupkg
+*.snupkg
+**/[Pp]ackages/*
+!**/[Pp]ackages/build/
+
+## Visual Studio / VS Code / Rider
+.vs/
+.vscode/
+.idea/
+*. DotSettings.user
+
+## Secrets / local settings
+appsettings.*.json
+secrets.json
+*.pfx
+*.key
+.env
+.env.*
+!.env.example
+*.env.local
+
+## OS
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+.DS_Store
+
+## Custom ignored folders
+images/
+temp/
+publish/
+
+## Local AI-tooling configs (Webcoda-internal, not part of the app)
+.claude/
+.opencode/
+.antigravity/
+opencode.json
+CLAUDE.md
+AGENTS.md
