@@ -74,8 +74,34 @@ public class ClaudeUsageLimit
     [JsonPropertyName("resets_at")]
     public string? ResetsAt { get; set; }
 
+    /// <summary>Present on "weekly_scoped" limits — identifies what the limit applies to.</summary>
+    [JsonPropertyName("scope")]
+    public ClaudeLimitScope? Scope { get; set; }
+
     [JsonPropertyName("is_active")]
     public bool? IsActive { get; set; }
+
+    [JsonIgnore]
+    public DateTime? ResetAt => ClaudeJson.ParseIso(ResetsAt);
+}
+
+public class ClaudeLimitScope
+{
+    [JsonPropertyName("model")]
+    public ClaudeLimitScopeModel? Model { get; set; }
+
+    [JsonPropertyName("surface")]
+    public string? Surface { get; set; }
+}
+
+public class ClaudeLimitScopeModel
+{
+    [JsonPropertyName("id")]
+    public string? Id { get; set; }
+
+    /// <summary>e.g. "Fable" — the model family this weekly limit is scoped to.</summary>
+    [JsonPropertyName("display_name")]
+    public string? DisplayName { get; set; }
 }
 
 // --- Account / plan metadata read from ~/.claude.json (oauthAccount block) ---

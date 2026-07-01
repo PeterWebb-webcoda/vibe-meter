@@ -96,6 +96,26 @@ public sealed class ClaudeProvider : IUsageProvider
                 ResetAt: sevenDay.ResetAt));
         }
 
+        // Model-scoped weekly limits (e.g. a separate Fable 5 allowance) show up as
+        // "weekly_scoped" entries in the structured limits array, each carrying the
+        // model's display name. Surface one gauge per scoped model found.
+        if (data?.Limits is { } limits)
+        {
+            foreach (var limit in limits)
+            {
+                if (limit.Kind != "weekly_scoped") continue;
+                var modelName = limit.Scope?.Model?.DisplayName;
+                if (string.IsNullOrWhiteSpace(modelName)) continue;
+
+                gauges.Add(new UsageGauge(
+                    Id: $"claude-weekly-{modelName.ToLowerInvariant()}",
+                    Title: $"Weekly ({modelName})",
+                    Subtitle: DisplayName,
+                    PercentRemaining: RemainingFrom(limit.Percent ?? 0),
+                    ResetAt: limit.ResetAt));
+            }
+        }
+
         string? planLabel = ClaudeAuth.FriendlyTier(account?.UserRateLimitTier);
         string? resetNote = null;
         if (data?.SevenDay?.ResetAt is { } weeklyReset)
