@@ -281,7 +281,7 @@
                                                       ItemTemplateSelector="{StaticResource MeterTemplateSelector}">
                                             <ItemsControl.ItemsPanel>
                                                 <ItemsPanelTemplate>
-                                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"/>
+                                                    <WrapPanel Orientation="Horizontal" HorizontalAlignment="Center"/>
                                                 </ItemsPanelTemplate>
                                             </ItemsControl.ItemsPanel>
                                         </ItemsControl>

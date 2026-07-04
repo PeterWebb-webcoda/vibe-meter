@@ -11,6 +11,7 @@
     <Version>0.1.0</Version>
     <Company>WebCoda</Company>
     <Product>VibeMeter</Product>
+    <ApplicationIcon>icon.ico</ApplicationIcon>
   </PropertyGroup>
 
   <!-- Release packaging: self-contained single-file exe (publish -r win-x64). -->
@@ -21,6 +22,9 @@
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
     <DebugType>embedded</DebugType>
   </PropertyGroup>
+  <ItemGroup>
+    <Resource Include="icon.ico" />
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />

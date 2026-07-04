@@ -37,7 +37,7 @@ public partial class App : Application
         // Tray icon
         _notifyIcon = new TaskbarIcon
         {
-            Icon = System.Drawing.SystemIcons.Information,
+            Icon = new System.Drawing.Icon(Application.GetResourceStream(new Uri("pack://application:,,,/icon.ico")).Stream),
             ToolTipText = "Vibe Meter",
             LeftClickCommand = new RelayCommand(ToggleMainWindow)
         };
