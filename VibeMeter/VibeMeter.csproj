@@ -25,6 +25,12 @@
   <ItemGroup>
     <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="Hardcodet.NotifyIcon.Wpf" Version="2.0.1" />
+    <!-- Reads Antigravity's OAuth refresh token from its state.vscdb (SQLite). -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.0" />
+    <!-- Pin the patched native SQLite (3.50.2+) to clear CVE-2025-6965; the transitive
+         default (2.1.x) bundles a vulnerable SQLite. We only run a single read-only
+         SELECT, so the practical risk is nil, but a clean build is better. -->
+    <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="3.50.3" />
   </ItemGroup>
 
 </Project>

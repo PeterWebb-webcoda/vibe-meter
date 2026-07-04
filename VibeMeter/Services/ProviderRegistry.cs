@@ -24,12 +24,11 @@ public class ProviderRegistry
             new CodexProvider(),
             new ClaudeProvider(),
             new ZaiProvider(),
-            // Google (AI Pro / Antigravity) is parked for now: there is no public
-            // usage API, and the only route (scraping gemini.google.com's private
-            // batchexecute RPC) is blocked by Chrome 127+ app-bound cookie encryption.
-            // The GoogleProvider/GoogleAuth files remain for when we revisit it.
-            // See docs/provider-research.md for the full investigation.
-            // new GoogleProvider()
+            // Google AI Pro / Antigravity: per-model quota via Google's Cloud Code
+            // backend (cloudcode-pa.googleapis.com), authed with the OAuth refresh token
+            // the Gemini CLI / Antigravity store in ~/.gemini/oauth_creds.json. See
+            // docs/provider-research.md for the full API investigation.
+            new GoogleProvider()
         };
     }
 

@@ -98,6 +98,12 @@ public partial class MainViewModel : ObservableObject
                 };
             }
 
+            // Persist any error to the log file (both thrown and Error-state results).
+            if (usage.State == ProviderState.Error)
+            {
+                ErrorLog.Write(provider.Id, provider.DisplayName, usage.ErrorMessage);
+            }
+
             System.Windows.Application.Current?.Dispatcher.Invoke(() => card.Apply(usage));
         });
 

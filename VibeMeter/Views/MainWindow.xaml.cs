@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Windows;
 using System.Windows.Input;
+using VibeMeter.Services;
 using VibeMeter.ViewModels;
 
 namespace VibeMeter.Views;
@@ -84,4 +85,25 @@ public partial class MainWindow : Window
 
     private void SettingsButton_Click(object sender, RoutedEventArgs e)
         => (System.Windows.Application.Current as App)?.ShowSettings();
+
+    /// <summary>
+    /// Copies the error message from the clicked provider card to the clipboard, formatted
+    /// with the provider name and a reference to the error log file.
+    /// </summary>
+    private void CopyErrorButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: ProviderViewModel vm }) return;
+
+        var message =
+            $"[{vm.DisplayName}] {vm.ErrorMessage}\n\n" +
+            $"Logged to: {ErrorLog.LogPath}";
+        try
+        {
+            Clipboard.SetText(message);
+        }
+        catch
+        {
+            // Clipboard can be locked by other processes — ignore silently.
+        }
+    }
 }

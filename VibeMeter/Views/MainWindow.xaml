@@ -168,7 +168,7 @@
                         <TextBlock Text="Vibe Meter"
                                    FontSize="20" FontWeight="SemiBold"
                                    Foreground="{StaticResource PrimaryText}"/>
-                        <TextBlock Text="AI usage across Codex, Claude &amp; Z.ai"
+                        <TextBlock Text="AI usage across Codex, Claude, Z.ai &amp; Google"
                                    FontSize="11"
                                    Foreground="{StaticResource SecondaryText}"/>
                     </StackPanel>
@@ -311,8 +311,17 @@
                                         <!-- Error -->
                                         <Border Background="#30482020" CornerRadius="8" Padding="10" Margin="0,8,0,0"
                                                 Visibility="{Binding ShowError, Converter={StaticResource BoolToVis}}">
-                                            <TextBlock Text="{Binding ErrorMessage}" FontSize="11"
-                                                       Foreground="#F04840" TextWrapping="Wrap"/>
+                                            <DockPanel>
+                                                <Button DockPanel.Dock="Right" VerticalAlignment="Top"
+                                                        Click="CopyErrorButton_Click" ToolTip="Copy error message"
+                                                        Background="Transparent" BorderBrush="#40F04840"
+                                                        BorderThickness="1" Cursor="Hand"
+                                                        Padding="6,1" Margin="8,0,0,0">
+                                                    <TextBlock Text="Copy" FontSize="10" Foreground="#F04840"/>
+                                                </Button>
+                                                <TextBlock Text="{Binding ErrorMessage}" FontSize="11"
+                                                           Foreground="#F04840" TextWrapping="Wrap"/>
+                                            </DockPanel>
                                         </Border>
 
                                         <!-- Status line -->

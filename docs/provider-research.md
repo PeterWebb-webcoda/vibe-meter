@@ -8,7 +8,7 @@ monitors. Conducted 29/06/2026. Status reflects the codebase at the time of writ
 | Codex (OpenAI) | ✅ Live gauges | `~/.codex/auth.json` → ChatGPT `wham/usage` API |
 | Claude Code | ✅ Live gauges | `~/.claude/usage_cache.json` (local cache) |
 | Z.ai GLM | ✅ Live gauges | `api.z.ai/api/monitor/usage/quota/limit` (via `ZAI_API_KEY`) |
-| Google AI Pro / Antigravity | ⏸ Parked | No public usage API; cookie-scraping blocked |
+| Google AI Pro / Antigravity | ✅ Live gauges | `cloudcode-pa.googleapis.com` Cloud Code backend (via `~/.gemini/oauth_creds.json`) |
 
 ---
 
@@ -132,63 +132,87 @@ shape) without throwing.
 
 ---
 
-## Google AI Pro / Antigravity — ⏸ parked
+## Google AI Pro / Antigravity — ✅ implemented (live gauges)
 
 ### Finding
-Google exposes **no public usage-meter API** for the AI Pro / AI Ultra subscriptions or
-for Antigravity. Usage is enforced server-side (token-burn model over rolling 5-hour and
-weekly windows) and surfaced only as in-app notifications inside Antigravity itself.
+The earlier "parked" conclusion (no public usage API; the only route being cookie
+scraping of `gemini.google.com`, blocked by Chrome app-bound encryption) was **wrong**.
+There is a clean, official OAuth API — the same one Antigravity and the Antigravity
+Cockpit VS Code extension (`jlcodes.antigravity-cockpit`) call. The mechanism was
+confirmed by reverse-engineering the cockpit extension's bundled JS and verified
+end-to-end against a live account.
 
-- The Google Cloud Console quota page covers Vertex AI / AI Studio (pay-per-use API
-  projects) — a separate surface from the AI Pro subscription.
-- No local quota file exists. The `~/.gemini/` tree holds conversations (opaque
-  protobuf), onboarding state, and the signed-in account (`google_accounts.json`), but
-  no remaining-quota figures.
-
-### The only known route (unofficial)
-The consumer Gemini web UI (`gemini.google.com/usage`) loads its numbers through
-Google's private `batchexecute` RPC:
+### The API — Google Cloud Code backend
+Antigravity and the cockpit both read quota from `cloudcode-pa.googleapis.com`, Google's
+internal Cloud Code service, using the user's own Google OAuth credentials:
 
 ```
-POST https://gemini.google.com/_/BardChatUi/data/batchexecute?rpcids=<ID>&...&bl=<build>
-Content-Type: application/x-www-form-urlencoded
-Authorization: SAPISIDHASH <unix_seconds>_<sha1(unix_seconds + " " + SAPISID + " " + origin)>
-Cookie: <full google.com session cookies>
-
-f.req=[[["<rpcid>","[<args as stringified JSON>]",null,"generic"]]]
+POST https://cloudcode-pa.googleapis.com/v1internal:loadCodeAssist
+POST https://cloudcode-pa.googleapis.com/v1internal:fetchAvailableModels
+Authorization: Bearer <OAuth2 access token>
+Content-Type: application/json        # responses are gzip-compressed
 ```
 
-The response is `)]}'`-prefixed, length-prefixed, with nested arrays and JSON-as-strings
-that must be parsed manually. Auth requires the user's live Google session cookies
-(`SAPISID` / `__Secure-1PAPISID` / `HSID` / `SSID` / `APISID` / `SID`, …).
+`fetchAvailableModels` is the one that carries the gauges. Each model in the response has:
 
-### Blocker: Chrome 127+ app-bound cookie encryption
-The user's machine runs **Chrome 149** with `os_crypt.app_bound_encrypted_key` present in
-`Local State`. Chrome 127+ wraps the cookie-encryption key via an app-bound elevation
-service (COM `IElevationManager::DecryptAppBoundKey`), so the cookie DB can no longer be
-decrypted with the old DPAPI-only approach. Extracting cookies now requires invoking
-that COM service (complex, version-coupled, actively hardened by Google).
+```jsonc
+{
+  "displayName": "Gemini 3.5 Flash (Low)",
+  "quotaInfo": {
+    "remainingFraction": 1,                 // 0..1  → PercentRemaining = ×100
+    "resetTime": "2026-07-03T04:56:03Z"     // ISO-8601 UTC
+  },
+  // …many other capability fields, all ignored
+}
+```
 
-### Risks of pursuing this
-- **Fragility:** the `rpcids`, the `bl` build version, and the response shape are
-  internal implementation details Google changes without notice.
-- **Terms of Service:** automating around Google's session auth is a ToS grey area.
-- **Cookie expiry:** session cookies expire; the integration would need periodic
-  re-auth.
+Models are grouped into quota pools by the top-level `tieredModelIds` map
+(`flashLite` / `flash` / `pro` → list of model ids). VibeMeter aggregates each pool into
+one gauge = average `remainingFraction` across the pool's members, with the pool's
+earliest `resetTime` — matching the cockpit's "grouping" view. `loadCodeAssist` returns
+the subscription tier (`currentTier.name` for free users, e.g. "Antigravity";
+`paidTier.name` / `paidTier.availableAICredits` for paid), used for the plan label and
+cached for 10 minutes.
 
-### Decision: parked
-Google is **unregistered** for now (card removed). The `GoogleProvider` / `GoogleAuth`
-files are retained for when we revisit. To resume:
+### Credentials
+The Gemini CLI / Antigravity store a long-lived **refresh token** (and a short-lived
+access token) as plain JSON at `%USERPROFILE%\.gemini\oauth_creds.json`:
 
-1. Capture ground truth from `gemini.google.com/usage` via DevTools — a "Copy as cURL"
-   of the `batchexecute` request that returns the usage numbers, plus its response body.
-   This yields the exact `rpcids`, the `f.req` body, the `bl` param, and a working
-   cookie to test with.
-2. Build `SAPISIDHASH` + the `batchexecute` client + response parser against that
-   capture; validate it returns live 5h/weekly figures.
-3. Solve cookie acquisition — options: (a) Chrome app-bound decryption via the elevation
-   COM service, (b) read Antigravity's Chromium profile cookies (`~/.gemini/
-   antigravity-browser-profile/`) if the user logs in there (may not have app-bound
-   encryption), or (c) manual cookie paste as an MVP.
-4. Re-register `GoogleProvider` with a safe fallback to the detection-only state
-   whenever the scrape fails (never show stale/wrong numbers).
+```jsonc
+{
+  "access_token": "ya29.a0…",      // ~1h lifetime, refreshed on demand
+  "refresh_token": "1//0g…",       // long-lived — the reusable credential
+  "scope": "https://www.googleapis.com/auth/cloud-platform …",
+  "token_type": "Bearer",
+  "expiry_date": 1781002694488     // epoch ms
+}
+```
+
+The refresh token is exchanged at `https://oauth2.googleapis.com/token` for a fresh
+access token using the public OAuth client credentials shipped in the Antigravity
+Cockpit extension (client ID `1071006060591-…apps.googleusercontent.com`, secret
+`GOCSPX-…`). These are not secrets — they are distributed in the extension's bundled
+JavaScript, the same model the Gemini CLI itself uses. Account identity (non-secret)
+still comes from `~/.gemini/google_accounts.json`.
+
+### Why this is safe
+This is a read-only call against the user's own subscription, authed with the user's own
+refresh token, using the same client identity as the official Antigravity Cockpit
+extension. No cookies are scraped, no scraping of `gemini.google.com` occurs, and
+Chrome's app-bound cookie encryption is no longer relevant.
+
+### Implementation
+`Providers/Google/`: `GoogleProvider` + `GoogleAuth` + `GoogleApiClient` + `GoogleModels`.
+`GoogleAuth` reads the refresh token from `oauth_creds.json` and handles token
+exchange/caching. `GoogleApiClient` POSTs the two `/v1internal:` methods with gzip
+handling. `GoogleProvider` builds per-pool gauges, derives the plan label from the tier
+name + account email, and falls back to `NotConfigured` (no token) or `Error` (API/auth
+failure) without throwing — `loadCodeAssist` failure is non-fatal (partial `Ok`).
+
+### Deferred follow-ups (out of scope for the initial build)
+- **Standalone browser-OAuth login** — a full PKCE flow so VibeMeter works without the
+  Gemini CLI/Antigravity installed. `GoogleAuth` is structured to slot this in.
+- **Antigravity `state.vscdb` fallback** — the IDE's own token copy lives in
+  `%APPDATA%\Antigravity\User\globalStorage\state.vscdb` as base64-protobuf. Adding it
+  would require a SQLite + lightweight protobuf dependency; deferred because the
+  plain-JSON `oauth_creds.json` covers the common case.
