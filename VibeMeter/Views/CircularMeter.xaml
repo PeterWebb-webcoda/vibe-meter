@@ -1,50 +1,49 @@
 <UserControl x:Class="VibeMeter.Views.CircularMeter"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             Width="136">
-    <Border CornerRadius="8" Background="#30FFFFFF" Padding="12">
-        <StackPanel HorizontalAlignment="Center">
-            <!-- Circular gauge -->
-            <Canvas Width="70" Height="70" HorizontalAlignment="Center">
-                <!-- Outer Usage Gauge -->
-                <Ellipse Width="70" Height="70"
-                         Stroke="#19FFFFFF" StrokeThickness="8"
-                         Fill="Transparent" />
-                <Path x:Name="ArcPath" StrokeThickness="8" Fill="Transparent" />
+             Width="100">
+    <!-- Removed bulky #30FFFFFF background border, using simple margin -->
+    <StackPanel HorizontalAlignment="Center" Margin="4">
+        <!-- Circular gauge -->
+        <Canvas Width="54" Height="54" HorizontalAlignment="Center">
+            <!-- Outer Usage Gauge -->
+            <Ellipse Width="54" Height="54"
+                     Stroke="#19FFFFFF" StrokeThickness="6"
+                     Fill="Transparent" />
+            <Path x:Name="ArcPath" StrokeThickness="6" Fill="Transparent" />
 
-                <!-- Inner Reset Countdown Gauge -->
-                <Ellipse x:Name="ResetTrack" Width="47" Height="47"
-                         Canvas.Left="11.5" Canvas.Top="11.5"
-                         Stroke="#0DFFFFFF" StrokeThickness="2.5"
-                         Fill="Transparent" Visibility="Collapsed" />
-                <Path x:Name="ResetArcPath" StrokeThickness="2.5" Fill="Transparent"
-                      Visibility="Collapsed" />
-            </Canvas>
+            <!-- Inner Reset Countdown Gauge -->
+            <Ellipse x:Name="ResetTrack" Width="36" Height="36"
+                     Canvas.Left="9" Canvas.Top="9"
+                     Stroke="#0DFFFFFF" StrokeThickness="2"
+                     Fill="Transparent" Visibility="Collapsed" />
+            <Path x:Name="ResetArcPath" StrokeThickness="2" Fill="Transparent"
+                  Visibility="Collapsed" />
+        </Canvas>
 
-            <Grid Margin="0,-70,0,0" Width="70" Height="70" HorizontalAlignment="Center">
-                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                    <TextBlock x:Name="PercentText"
-                               FontFamily="Segoe UI" FontSize="20" FontWeight="Bold"
-                               Foreground="White" HorizontalAlignment="Center" />
-                    <TextBlock Text="%"
-                               FontFamily="Segoe UI" FontSize="9"
-                               Foreground="#B0B0C0" HorizontalAlignment="Center"
-                               Margin="0,-2,0,0" />
-                </StackPanel>
-            </Grid>
+        <Grid Margin="0,-54,0,0" Width="54" Height="54" HorizontalAlignment="Center">
+            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                <TextBlock x:Name="PercentText"
+                           FontFamily="Segoe UI" FontSize="15" FontWeight="Bold"
+                           Foreground="White" HorizontalAlignment="Center" />
+                <TextBlock Text="%"
+                           FontFamily="Segoe UI" FontSize="8"
+                           Foreground="#B0B0C0" HorizontalAlignment="Center"
+                           Margin="0,-2,0,0" />
+            </StackPanel>
+        </Grid>
 
-            <TextBlock x:Name="TitleText"
-                       FontFamily="Segoe UI" FontSize="12" FontWeight="Bold"
-                       Foreground="White" HorizontalAlignment="Center"
-                       Margin="0,6,0,0" />
-            <TextBlock x:Name="SubtitleText"
-                       FontFamily="Segoe UI" FontSize="10"
-                       Foreground="#B0B0C0" HorizontalAlignment="Center"
-                       Margin="0,2,0,0" />
-            <TextBlock x:Name="ResetTextBlock"
-                       FontFamily="Segoe UI" FontSize="9"
-                       Foreground="#B0B0C0" HorizontalAlignment="Center"
-                       Margin="0,4,0,0" />
-        </StackPanel>
-    </Border>
+        <TextBlock x:Name="TitleText"
+                   FontFamily="Segoe UI" FontSize="11" FontWeight="Bold"
+                   Foreground="White" HorizontalAlignment="Center"
+                   Margin="0,6,0,0" />
+        <TextBlock x:Name="SubtitleText"
+                   FontFamily="Segoe UI" FontSize="9"
+                   Foreground="#B0B0C0" HorizontalAlignment="Center"
+                   Margin="0,2,0,0" />
+        <TextBlock x:Name="ResetTextBlock"
+                   FontFamily="Segoe UI" FontSize="9"
+                   Foreground="#B0B0C0" HorizontalAlignment="Center"
+                   Margin="0,2,0,0" />
+    </StackPanel>
 </UserControl>

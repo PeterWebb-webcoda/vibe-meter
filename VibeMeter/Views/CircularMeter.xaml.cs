@@ -57,9 +57,9 @@ public partial class CircularMeter : UserControl
         SubtitleText.Text = data.Subtitle;
         ResetTextBlock.Text = data.ResetText;
 
-        const double centreX = 35;
-        const double centreY = 35;
-        const double radius = 31;
+        const double centreX = 27;
+        const double centreY = 27;
+        const double radius = 24;
         const double startAngle = -90.0; // 12 o'clock
 
         int pct = data.ClampedPercent;
@@ -129,7 +129,7 @@ public partial class CircularMeter : UserControl
             ResetTrack.Visibility = Visibility.Visible;
             ResetArcPath.Visibility = Visibility.Visible;
 
-            const double rRadius = 22.25;
+            const double rRadius = 17;
             const double rStartAngle = -90.0;
 
             double rpct = resetPct.Value;
