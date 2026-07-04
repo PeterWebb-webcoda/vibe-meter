@@ -88,6 +88,12 @@ public sealed class GoogleAuth
     private static readonly Regex RefreshTokenRegex =
         new(@"1//[A-Za-z0-9_-]{30,}", RegexOptions.Compiled);
 
+    // Matches long runs of base64-safe characters (inner protobuf fields that are
+    // themselves base64-encoded). Used to locate the nested blob in newer Antigravity
+    // versions where the token payload is double-encoded.
+    private static readonly Regex InnerBase64Regex =
+        new(@"[A-Za-z0-9+/=_-]{50,}", RegexOptions.Compiled);
+
     // Cached token + its absolute expiry (UTC).
     private GoogleTokenInfo? _cachedToken;
 
@@ -142,13 +148,50 @@ public sealed class GoogleAuth
             // (a "1//..." ASCII string) straight out of the bytes — no protobuf parser needed.
             var bytes = Convert.FromBase64String(base64Blob);
             var text = System.Text.Encoding.ASCII.GetString(bytes);
+
+            // Try 1: direct regex on the decoded outer protobuf (original format).
             var match = RefreshTokenRegex.Match(text);
-            return match.Success ? match.Value : null;
+            if (match.Success) return match.Value;
+
+            // Try 2: newer Antigravity versions double-encode — the outer protobuf
+            // contains an inner base64 string whose decoded payload holds the token.
+            return ExtractFromNestedBase64(text);
         }
         catch
         {
             return null;
         }
+    }
+
+    /// <summary>
+    /// Searches <paramref name="outerText"/> for inner base64-encoded strings, decodes
+    /// each candidate, and returns the first refresh token found. Returns null when no
+    /// nested token is present.
+    /// </summary>
+    private static string? ExtractFromNestedBase64(string outerText)
+    {
+        foreach (Match candidate in InnerBase64Regex.Matches(outerText))
+        {
+            try
+            {
+                // Normalise URL-safe base64 to standard base64 and add padding.
+                var b64 = candidate.Value.Replace('-', '+').Replace('_', '/');
+                int pad = b64.Length % 4;
+                if (pad > 0) b64 += new string('=', 4 - pad);
+
+                var innerBytes = Convert.FromBase64String(b64);
+                var innerText = System.Text.Encoding.UTF8.GetString(innerBytes);
+
+                var tokenMatch = RefreshTokenRegex.Match(innerText);
+                if (tokenMatch.Success) return tokenMatch.Value;
+            }
+            catch
+            {
+                // Not valid base64 — skip this candidate.
+            }
+        }
+
+        return null;
     }
 
     /// <summary>The signed-in Google account email, or null when not available.</summary>

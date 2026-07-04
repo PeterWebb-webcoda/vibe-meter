@@ -265,7 +265,9 @@
 
                                                 <!-- Available-credits badge -->
                                                 <Border Background="#3040C873" CornerRadius="10" Padding="8,2"
-                                                        Visibility="{Binding ShowResetBank, Converter={StaticResource BoolToVis}}">
+                                                        Visibility="{Binding ShowResetBank, Converter={StaticResource BoolToVis}}"
+                                                        ToolTip="{Binding ResetCreditsTooltip}"
+                                                        Cursor="Hand">
                                                     <StackPanel Orientation="Horizontal">
                                                         <TextBlock Text="{Binding AvailableCount}" FontSize="10"
                                                                    Foreground="#40C873" FontWeight="SemiBold"/>

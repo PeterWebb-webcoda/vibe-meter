@@ -36,6 +36,15 @@ public sealed record UsageGauge(
     DateTime? ResetAt);
 
 /// <summary>
+/// One normalised reset-credit entry (e.g. a Codex rate-limit reset credit).
+/// </summary>
+public sealed record ResetCredit(
+    string Status,
+    DateTime GrantedAt,
+    DateTime ExpiresAt,
+    DateTime? RedeemedAt);
+
+/// <summary>
 /// The normalised result of a provider fetch, independent of any specific API shape.
 /// </summary>
 public sealed class ProviderUsage
@@ -47,6 +56,7 @@ public sealed class ProviderUsage
     public string? PlanLabel { get; init; }
     public int? AvailableCount { get; init; }
     public string? ResetNote { get; init; }
+    public IReadOnlyList<ResetCredit> ResetCredits { get; init; } = Array.Empty<ResetCredit>();
     public IReadOnlyList<UsageGauge> Gauges { get; init; } = Array.Empty<UsageGauge>();
     public DateTime FetchedAt { get; init; } = DateTime.Now;
 

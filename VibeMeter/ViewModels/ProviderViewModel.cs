@@ -23,6 +23,7 @@ public sealed partial class ProviderViewModel : ObservableObject
     [ObservableProperty] private string? _planLabel;
     [ObservableProperty] private int? _availableCount;
     [ObservableProperty] private string? _resetNote;
+    [ObservableProperty] private string? _resetCreditsTooltip;
     [ObservableProperty] private string _statusText = "";
     [ObservableProperty] private DateTime? _lastFetched;
 
@@ -84,6 +85,7 @@ public sealed partial class ProviderViewModel : ObservableObject
         PlanLabel = usage.PlanLabel;
         AvailableCount = usage.AvailableCount;
         ResetNote = usage.ResetNote;
+        ResetCreditsTooltip = BuildCreditsTooltip(usage.ResetCredits);
         LastFetched = usage.FetchedAt;
         StatusText = DeriveStatusText(usage);
         PrimaryPercent = Gauges.Count > 0 ? Gauges[0].Percent : 0;
@@ -131,6 +133,26 @@ public sealed partial class ProviderViewModel : ObservableObject
         }
         var d = span.TotalDays;
         return d >= 10 ? $"{(int)d}d" : $"{d:0.#}d";
+    }
+
+    private static string? BuildCreditsTooltip(IReadOnlyList<ResetCredit> credits)
+    {
+        if (credits.Count == 0) return null;
+
+        var lines = new List<string> { "Reset Credits:" };
+        for (int i = 0; i < credits.Count; i++)
+        {
+            var c = credits[i];
+            var daysLeft = (int)Math.Ceiling((c.ExpiresAt - DateTime.Now).TotalDays);
+            string expiry = daysLeft switch
+            {
+                <= 0 => "expired",
+                1    => $"expires tomorrow ({c.ExpiresAt:MMM d})",
+                _    => $"expires {c.ExpiresAt:MMM d} ({daysLeft} days)"
+            };
+            lines.Add($"  Credit {i + 1}: {expiry}");
+        }
+        return string.Join("\n", lines);
     }
 
     private static string DeriveStatusText(ProviderUsage usage) => usage.State switch

@@ -38,8 +38,23 @@ public class UsageGaugeData
         }
     }
 
-    /// <summary>Human-readable reset description, e.g. "resets 2:30 PM".</summary>
-    public string ResetText => ResetAt.HasValue
-        ? $"resets {ResetAt.Value:h:mm tt}"
-        : "current window";
+    /// <summary>Human-readable reset description, e.g. "resets Jul 7, 11:49 AM".</summary>
+    public string ResetText
+    {
+        get
+        {
+            if (!ResetAt.HasValue) return "current window";
+
+            var reset = ResetAt.Value;
+            var now = DateTime.Now;
+            string time = reset.ToString("h:mm tt");
+
+            if (reset.Date == now.Date)
+                return $"resets {time}";
+            if (reset.Date == now.Date.AddDays(1))
+                return $"resets tomorrow {time}";
+
+            return $"resets {reset:MMM d}, {time}";
+        }
+    }
 }

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading.Tasks;
 using VibeMeter.Core;
 
@@ -117,6 +118,20 @@ public sealed class CodexProvider : IUsageProvider
             availableCount = credits.AvailableCount;
         }
 
+        // Build normalised credit list for tooltip display.
+        var resetCredits = new List<ResetCredit>();
+        if (credits?.Credits is { } creditList)
+        {
+            foreach (var c in creditList.Where(c => c.IsAvailable))
+            {
+                resetCredits.Add(new ResetCredit(
+                    Status: c.Status,
+                    GrantedAt: c.GrantedAt,
+                    ExpiresAt: c.ExpiresAt,
+                    RedeemedAt: c.RedeemedAt));
+            }
+        }
+
         string? errorMessage = (usageError, creditsError) switch
         {
             (not null, not null) => usageError,
@@ -133,6 +148,7 @@ public sealed class CodexProvider : IUsageProvider
             PlanLabel = planLabel,
             AvailableCount = availableCount,
             ResetNote = resetNote,
+            ResetCredits = resetCredits,
             Gauges = gauges,
             ErrorMessage = errorMessage
         };
