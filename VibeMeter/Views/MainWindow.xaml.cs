@@ -53,8 +53,8 @@ public partial class MainWindow : Window
         else
         {
             SizeToContent = SizeToContent.Manual;
-            MinWidth = 380;
-            MinHeight = 460;
+            MinWidth = 220;
+            MinHeight = 360;
             ResizeMode = ResizeMode.CanResizeWithGrip;
             Width = FullWidth;
             Height = FullHeight;

@@ -156,8 +156,8 @@ public sealed class GoogleProvider : IUsageProvider
     {
         int Rank(GoogleQuotaBucket b) => b.Window.ToLowerInvariant() switch
         {
-            "weekly" => 0,
-            "5h"     => 1,
+            "5h"     => 0,
+            "weekly" => 1,
             _        => 2,
         };
         return buckets.OrderBy(Rank);
