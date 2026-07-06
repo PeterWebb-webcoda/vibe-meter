@@ -33,7 +33,8 @@ public sealed record UsageGauge(
     string Title,
     string? Subtitle,
     int PercentRemaining,
-    DateTime? ResetAt);
+    DateTime? ResetAt,
+    string? TooltipText = null);
 
 /// <summary>
 /// One normalised reset-credit entry (e.g. a Codex rate-limit reset credit).
@@ -58,6 +59,7 @@ public sealed class ProviderUsage
     public string? ResetNote { get; init; }
     public IReadOnlyList<ResetCredit> ResetCredits { get; init; } = Array.Empty<ResetCredit>();
     public IReadOnlyList<UsageGauge> Gauges { get; init; } = Array.Empty<UsageGauge>();
+    public object? ExtensionData { get; init; }
     public DateTime FetchedAt { get; init; } = DateTime.Now;
 
     /// <summary>Convenience factory for a "not yet implemented / coming soon" provider.</summary>

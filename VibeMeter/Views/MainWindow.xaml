@@ -104,7 +104,7 @@
                     <!-- Two gauge sections side by side -->
                     <StackPanel Orientation="Horizontal">
                         <!-- 5h section -->
-                        <StackPanel Width="64" Margin="0,0,6,0">
+                        <StackPanel Width="64" Margin="0,0,6,0" ToolTip="{Binding FiveHourTooltip}">
                             <DockPanel>
                                 <TextBlock Text="5h" FontSize="9" Foreground="#80FFFFFF"
                                            DockPanel.Dock="Left" VerticalAlignment="Center"/>
@@ -121,7 +121,7 @@
                         </StackPanel>
 
                         <!-- Weekly section -->
-                        <StackPanel Width="64">
+                        <StackPanel Width="64" ToolTip="{Binding WeeklyTooltip}">
                             <DockPanel>
                                 <TextBlock Text="Wk" FontSize="9" Foreground="#80FFFFFF"
                                            DockPanel.Dock="Left" VerticalAlignment="Center"/>
@@ -273,6 +273,27 @@
                                                         <TextBlock Text=" available" FontSize="10" Foreground="#40C873"/>
                                                     </StackPanel>
                                                 </Border>
+
+                                                <!-- Details button -->
+                                                <Button Background="Transparent" BorderBrush="#38FFFFFF" BorderThickness="1"
+                                                        Foreground="{StaticResource PrimaryText}" Padding="8,2" Margin="8,0,0,0"
+                                                        Visibility="{Binding ShowDetailsButton, Converter={StaticResource BoolToVis}}"
+                                                        Click="DetailsButton_Click" Cursor="Hand">
+                                                    <TextBlock Text="Cost breakdown" FontSize="10"/>
+                                                    <Button.Template>
+                                                        <ControlTemplate TargetType="Button">
+                                                            <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                                                    BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="10">
+                                                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" Margin="{TemplateBinding Padding}"/>
+                                                            </Border>
+                                                            <ControlTemplate.Triggers>
+                                                                <Trigger Property="IsMouseOver" Value="True">
+                                                                    <Setter Property="Background" Value="#30FFFFFF"/>
+                                                                </Trigger>
+                                                            </ControlTemplate.Triggers>
+                                                        </ControlTemplate>
+                                                    </Button.Template>
+                                                </Button>
                                             </StackPanel>
                                         </DockPanel>
 
@@ -285,6 +306,54 @@
                                                 </ItemsPanelTemplate>
                                             </ItemsControl.ItemsPanel>
                                         </ItemsControl>
+
+                                        <!-- Cost Panel -->
+                                        <Border Background="#10FFFFFF" CornerRadius="8" Padding="12" Margin="0,12,0,0"
+                                                Visibility="{Binding HasCostData, Converter={StaticResource BoolToVis}}">
+                                            <StackPanel>
+                                                <!-- Total Costs -->
+                                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                                    <TextBlock Text="💰" FontSize="18" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                                    <StackPanel VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding TodayCostText}" FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource PrimaryText}"/>
+                                                        <StackPanel Orientation="Horizontal">
+                                                            <TextBlock Text="{Binding WeekCostText}" FontSize="11" Foreground="{StaticResource SecondaryText}"/>
+                                                            <TextBlock Text=" • " FontSize="11" Foreground="{StaticResource SecondaryText}"/>
+                                                            <TextBlock Text="{Binding TodayTokensText}" FontSize="11" Foreground="{StaticResource SecondaryText}"/>
+                                                        </StackPanel>
+                                                    </StackPanel>
+                                                </StackPanel>
+
+                                                <!-- Model Breakdown -->
+                                                <ItemsControl ItemsSource="{Binding CostModelBreakdowns}" Margin="0,16,0,0" Grid.IsSharedSizeScope="True">
+                                                    <ItemsControl.ItemTemplate>
+                                                        <DataTemplate>
+                                                            <Grid Margin="0,0,0,6">
+                                                                <Grid.ColumnDefinitions>
+                                                                    <ColumnDefinition Width="Auto" SharedSizeGroup="ModelName"/>
+                                                                    <ColumnDefinition Width="*"/>
+                                                                    <ColumnDefinition Width="Auto"/>
+                                                                </Grid.ColumnDefinitions>
+                                                                
+                                                                <TextBlock Grid.Column="0" Text="{Binding ModelName}" FontSize="11" Foreground="{StaticResource SecondaryText}" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                                                
+                                                                <ProgressBar Grid.Column="1" Minimum="0" Maximum="100" Value="{Binding Percentage100, Mode=OneWay}" Height="6" VerticalAlignment="Center" Margin="0,0,8,0">
+                                                                    <ProgressBar.Template>
+                                                                        <ControlTemplate TargetType="ProgressBar">
+                                                                            <Border Background="#20FFFFFF" CornerRadius="3" x:Name="PART_Track">
+                                                                                <Border Background="{Binding DataContext.AccentBrush, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CornerRadius="3" HorizontalAlignment="Left" x:Name="PART_Indicator" />
+                                                                            </Border>
+                                                                        </ControlTemplate>
+                                                                    </ProgressBar.Template>
+                                                                </ProgressBar>
+                                                                
+                                                                <TextBlock Grid.Column="2" Text="{Binding CostText}" FontSize="11" Foreground="{StaticResource PrimaryText}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                                            </Grid>
+                                                        </DataTemplate>
+                                                    </ItemsControl.ItemTemplate>
+                                                </ItemsControl>
+                                            </StackPanel>
+                                        </Border>
 
                                         <!-- Reset note -->
                                         <TextBlock Text="{Binding ResetNote}"

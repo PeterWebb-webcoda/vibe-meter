@@ -6,6 +6,7 @@ using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using VibeMeter.Core;
 using VibeMeter.Models;
+using VibeMeter.Providers.Claude;
 
 namespace VibeMeter.ViewModels;
 
@@ -26,6 +27,15 @@ public sealed partial class ProviderViewModel : ObservableObject
     [ObservableProperty] private string? _resetCreditsTooltip;
     [ObservableProperty] private string _statusText = "";
     [ObservableProperty] private DateTime? _lastFetched;
+    [ObservableProperty] private object? _extensionData;
+
+    // Cost Data
+    [ObservableProperty] private string? _todayCostText;
+    [ObservableProperty] private string? _weekCostText;
+    [ObservableProperty] private string? _monthCostText;
+    [ObservableProperty] private string? _todayTokensText;
+    [ObservableProperty] private bool _hasCostData;
+    public ObservableCollection<CostModelBreakdownItem> CostModelBreakdowns { get; } = new();
 
     /// <summary>Remaining % of the primary (first) gauge — drives the compact micro-bar.</summary>
     [ObservableProperty] private int _primaryPercent;
@@ -42,8 +52,10 @@ public sealed partial class ProviderViewModel : ObservableObject
 
     [ObservableProperty] private int _fiveHourPercent;
     [ObservableProperty] private string _fiveHourReset = "";
+    [ObservableProperty] private string? _fiveHourTooltip;
     [ObservableProperty] private int _weeklyPercent;
     [ObservableProperty] private string _weeklyReset = "";
+    [ObservableProperty] private string? _weeklyTooltip;
 
     public ObservableCollection<UsageGaugeData> Gauges { get; } = new();
 
@@ -51,6 +63,7 @@ public sealed partial class ProviderViewModel : ObservableObject
     public bool ShowNotConfigured => State == ProviderState.NotConfigured && !HasGauges;
     public bool ShowError => State == ProviderState.Error && !HasGauges;
     public bool ShowResetBank => AvailableCount.HasValue;
+    public bool ShowDetailsButton => Id == "claude"; // TODO: Base this on whether provider has detail view data
     public bool IsEnabled { get; set; } = true;
 
     /// <summary>Brand accent colour for this provider's card.</summary>
@@ -76,7 +89,8 @@ public sealed partial class ProviderViewModel : ObservableObject
                 Title = g.Title,
                 Subtitle = g.Subtitle ?? "",
                 Percent = g.PercentRemaining,
-                ResetAt = g.ResetAt
+                ResetAt = g.ResetAt,
+                TooltipText = g.TooltipText
             });
         }
 
@@ -87,14 +101,55 @@ public sealed partial class ProviderViewModel : ObservableObject
         ResetNote = usage.ResetNote;
         ResetCreditsTooltip = BuildCreditsTooltip(usage.ResetCredits);
         LastFetched = usage.FetchedAt;
+        ExtensionData = usage.ExtensionData;
         StatusText = DeriveStatusText(usage);
         PrimaryPercent = Gauges.Count > 0 ? Gauges[0].Percent : 0;
         PopulateCompactGauges(usage.Gauges);
+        PopulateCostData(usage.ExtensionData);
 
         OnPropertyChanged(nameof(HasGauges));
         OnPropertyChanged(nameof(ShowNotConfigured));
         OnPropertyChanged(nameof(ShowError));
         OnPropertyChanged(nameof(ShowResetBank));
+    }
+
+    private void PopulateCostData(object? extensionData)
+    {
+        if (extensionData is ClaudeCostDetailsData costData)
+        {
+            HasCostData = true;
+            TodayCostText = $"${costData.TodayTotalCostUsd:F2} today";
+            WeekCostText = $"${costData.WeekTotalCostUsd:F2} this week";
+            MonthCostText = $"${costData.MonthTotalCostUsd:F2} this month";
+            TodayTokensText = FormatTokens(costData.TodayTotalTokens) + " tokens";
+
+            CostModelBreakdowns.Clear();
+            decimal totalWeekCost = costData.WeekTotalCostUsd > 0 ? costData.WeekTotalCostUsd : 1;
+            
+            // Only show top 3 to save space, or all if we want
+            foreach (var mc in costData.WeeklyModelCosts.Take(4))
+            {
+                if (mc.TotalCostUsd <= 0.01m) continue;
+                CostModelBreakdowns.Add(new CostModelBreakdownItem
+                {
+                    ModelName = mc.ModelId,
+                    CostText = $"${mc.TotalCostUsd:F2}",
+                    Percentage = (double)(mc.TotalCostUsd / totalWeekCost)
+                });
+            }
+        }
+        else
+        {
+            HasCostData = false;
+            CostModelBreakdowns.Clear();
+        }
+    }
+
+    private static string FormatTokens(long tokens)
+    {
+        if (tokens >= 1_000_000) return $"{tokens / 1_000_000.0:0.#}M";
+        if (tokens >= 1_000) return $"{tokens / 1_000.0:0.#}K";
+        return tokens.ToString("N0");
     }
 
     private void PopulateCompactGauges(IReadOnlyList<UsageGauge> gauges)
@@ -116,8 +171,10 @@ public sealed partial class ProviderViewModel : ObservableObject
 
         FiveHourPercent = fiveH?.PercentRemaining ?? 0;
         FiveHourReset = FormatShortCountdown(fiveH?.ResetAt);
+        FiveHourTooltip = fiveH?.TooltipText;
         WeeklyPercent = weekly?.PercentRemaining ?? 0;
         WeeklyReset = FormatShortCountdown(weekly?.ResetAt);
+        WeeklyTooltip = weekly?.TooltipText;
     }
 
     private static string FormatShortCountdown(DateTime? resetAt)
@@ -176,4 +233,16 @@ public static class ProviderAccent
         "google"  => Color.FromRgb(66, 133, 244),   // Google blue
         _         => Color.FromRgb(160, 176, 192)
     };
+}
+
+public sealed class CostModelBreakdownItem
+{
+    public string ModelName { get; init; } = "";
+    public string CostText { get; init; } = "";
+    
+    /// <summary>Value from 0.0 to 1.0 representing proportion of total cost</summary>
+    public double Percentage { get; init; }
+
+    /// <summary>For binding to Grid column width or ProgressBar</summary>
+    public double Percentage100 => Percentage * 100;
 }

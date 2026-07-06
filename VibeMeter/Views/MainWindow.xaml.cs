@@ -106,4 +106,16 @@ public partial class MainWindow : Window
             // Clipboard can be locked by other processes — ignore silently.
         }
     }
+
+    private void DetailsButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not FrameworkElement { DataContext: ProviderViewModel vm }) return;
+        
+        if (vm.Id == "claude" && vm.ExtensionData != null)
+        {
+            var window = new CostDetailsWindow(vm.ExtensionData);
+            window.Owner = this;
+            window.ShowDialog();
+        }
+    }
 }

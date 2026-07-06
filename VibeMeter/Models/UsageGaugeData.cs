@@ -14,6 +14,7 @@ public class UsageGaugeData
     public string Subtitle { get; set; } = string.Empty;
     public int Percent { get; set; }
     public DateTime? ResetAt { get; set; }
+    public string? TooltipText { get; set; }
 
     /// <summary>Percent clamped to the 0–100 range.</summary>
     public int ClampedPercent => Math.Max(0, Math.Min(100, Percent));

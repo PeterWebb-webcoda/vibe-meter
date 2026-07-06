@@ -1,6 +1,7 @@
 <UserControl x:Class="VibeMeter.Views.BatteryMeter"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             ToolTip="{Binding TooltipText}">
     <Border CornerRadius="8" Background="#30FFFFFF" Padding="12">
         <Grid>
             <Grid.ColumnDefinitions>

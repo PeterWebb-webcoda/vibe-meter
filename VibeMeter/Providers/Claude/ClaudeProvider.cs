@@ -24,6 +24,8 @@ public sealed class ClaudeProvider : IUsageProvider
     public string DisplayName => "Claude Code";
 
     private readonly ClaudeAuth _auth;
+    private static Task<ClaudeCostDetailsData?>? _costTask;
+    private static ClaudeCostDetailsData? _lastCostData;
 
     /// <summary>Production constructor.</summary>
     public ClaudeProvider() : this(new ClaudeAuth()) { }
@@ -72,6 +74,19 @@ public sealed class ClaudeProvider : IUsageProvider
             return Error($"Could not read {ClaudeAuth.CacheFilePath}: {ex.Message}");
         }
 
+        // Trigger cost calculation in the background so we don't block normal UI load.
+        // It reads many JSONL files and can take 1-2 seconds.
+        if (_costTask == null || _costTask.IsCompleted)
+        {
+            if (_costTask?.IsCompletedSuccessfully == true)
+            {
+                _lastCostData = _costTask.Result;
+            }
+            _costTask = Task.Run(() => ClaudeCostCalculator.CalculateCostsAsync());
+        }
+
+        ClaudeCostDetailsData? costData = _lastCostData;
+
         // 4. Normalise into gauges.
         var data = cache.Data;
         var gauges = new List<UsageGauge>();
@@ -83,7 +98,8 @@ public sealed class ClaudeProvider : IUsageProvider
                 Title: "5h",
                 Subtitle: DisplayName,
                 PercentRemaining: RemainingFrom(fiveHour.UsedPercent),
-                ResetAt: fiveHour.ResetAt));
+                ResetAt: fiveHour.ResetAt,
+                TooltipText: costData != null ? $"Cost in last 5h: ${costData.FiveHourCostUsd:F2} ({costData.FiveHourTokens:N0} tokens)" : null));
         }
 
         if (data?.SevenDay is { } sevenDay)
@@ -93,7 +109,8 @@ public sealed class ClaudeProvider : IUsageProvider
                 Title: "Weekly",
                 Subtitle: DisplayName,
                 PercentRemaining: RemainingFrom(sevenDay.UsedPercent),
-                ResetAt: sevenDay.ResetAt));
+                ResetAt: sevenDay.ResetAt,
+                TooltipText: costData != null ? $"Cost in last 7 days: ${costData.WeekTotalCostUsd:F2} ({costData.WeekTotalTokens:N0} tokens)" : null));
         }
 
         // Model-scoped weekly limits (e.g. a separate Fable 5 allowance) show up as
@@ -143,7 +160,8 @@ public sealed class ClaudeProvider : IUsageProvider
             PlanLabel = planLabel,
             ResetNote = resetNote,
             Gauges = gauges,
-            ErrorMessage = errorMessage
+            ErrorMessage = errorMessage,
+            ExtensionData = costData
         };
     }
 
