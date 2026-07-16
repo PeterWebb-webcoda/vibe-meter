@@ -21,8 +21,8 @@ public class ProviderRegistry
     {
         Providers = new List<IUsageProvider>
         {
-            new CodexProvider(),
             new ClaudeProvider(),
+            new CodexProvider(),
             new ZaiProvider(),
             // Google AI Pro / Antigravity: per-model quota via Google's Cloud Code
             // backend (cloudcode-pa.googleapis.com), authed with the OAuth refresh token

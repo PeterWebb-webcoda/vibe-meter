@@ -35,6 +35,7 @@ public sealed partial class ProviderViewModel : ObservableObject
     [ObservableProperty] private string? _monthCostText;
     [ObservableProperty] private string? _todayTokensText;
     [ObservableProperty] private bool _hasCostData;
+    [ObservableProperty] private bool _isCostDetailsExpanded;
     public ObservableCollection<CostModelBreakdownItem> CostModelBreakdowns { get; } = new();
 
     /// <summary>Remaining % of the primary (first) gauge — drives the compact micro-bar.</summary>
@@ -63,7 +64,7 @@ public sealed partial class ProviderViewModel : ObservableObject
     public bool ShowNotConfigured => State == ProviderState.NotConfigured && !HasGauges;
     public bool ShowError => State == ProviderState.Error && !HasGauges;
     public bool ShowResetBank => AvailableCount.HasValue;
-    public bool ShowDetailsButton => Id == "claude"; // TODO: Base this on whether provider has detail view data
+    public bool ShowDetailsButton => HasCostData;
     public bool IsEnabled { get; set; } = true;
 
     /// <summary>Brand accent colour for this provider's card.</summary>
@@ -143,6 +144,7 @@ public sealed partial class ProviderViewModel : ObservableObject
             HasCostData = false;
             CostModelBreakdowns.Clear();
         }
+        OnPropertyChanged(nameof(ShowDetailsButton));
     }
 
     private static string FormatTokens(long tokens)

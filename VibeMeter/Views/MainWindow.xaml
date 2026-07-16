@@ -275,13 +275,13 @@
                                                 </Border>
 
                                                 <!-- Details button -->
-                                                <Button Background="Transparent" BorderBrush="#38FFFFFF" BorderThickness="1"
+                                                <ToggleButton Background="Transparent" BorderBrush="#38FFFFFF" BorderThickness="1"
                                                         Foreground="{StaticResource PrimaryText}" Padding="8,2" Margin="8,0,0,0"
                                                         Visibility="{Binding ShowDetailsButton, Converter={StaticResource BoolToVis}}"
-                                                        Click="DetailsButton_Click" Cursor="Hand">
+                                                        IsChecked="{Binding IsCostDetailsExpanded}" Cursor="Hand">
                                                     <TextBlock Text="Cost breakdown" FontSize="10"/>
-                                                    <Button.Template>
-                                                        <ControlTemplate TargetType="Button">
+                                                    <ToggleButton.Template>
+                                                        <ControlTemplate TargetType="ToggleButton">
                                                             <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
                                                                     BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="10">
                                                                 <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" Margin="{TemplateBinding Padding}"/>
@@ -290,10 +290,14 @@
                                                                 <Trigger Property="IsMouseOver" Value="True">
                                                                     <Setter Property="Background" Value="#30FFFFFF"/>
                                                                 </Trigger>
+                                                                <Trigger Property="IsChecked" Value="True">
+                                                                    <Setter Property="Background" Value="#40FFFFFF"/>
+                                                                    <Setter Property="BorderBrush" Value="#60FFFFFF"/>
+                                                                </Trigger>
                                                             </ControlTemplate.Triggers>
                                                         </ControlTemplate>
-                                                    </Button.Template>
-                                                </Button>
+                                                    </ToggleButton.Template>
+                                                </ToggleButton>
                                             </StackPanel>
                                         </DockPanel>
 
@@ -309,7 +313,7 @@
 
                                         <!-- Cost Panel -->
                                         <Border Background="#10FFFFFF" CornerRadius="8" Padding="12" Margin="0,12,0,0"
-                                                Visibility="{Binding HasCostData, Converter={StaticResource BoolToVis}}">
+                                                Visibility="{Binding IsCostDetailsExpanded, Converter={StaticResource BoolToVis}}">
                                             <StackPanel>
                                                 <!-- Total Costs -->
                                                 <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
