@@ -19,6 +19,12 @@ public sealed class CodexProvider : IUsageProvider
     private readonly CodexAuth _auth;
     private readonly Func<CodexApiClient> _clientFactory;
 
+    // Background cost calculator — static so the cached result persists across fetches.
+    // Codex's transcript corpus can be 1GB+, so this runs off-thread and the result
+    // may be one refresh cycle stale (null on first run).
+    private static Task<CodexCostDetailsData?>? _costTask;
+    private static CodexCostDetailsData? _lastCostData;
+
     /// <summary>Production constructor: uses the real auth file and a fresh HTTP client.</summary>
     public CodexProvider() : this(new CodexAuth()) { }
 
@@ -51,6 +57,19 @@ public sealed class CodexProvider : IUsageProvider
                 ErrorMessage = $"Sign in to Codex on this PC (creates {CodexAuth.AuthFilePath}), then refresh."
             };
         }
+
+        // Trigger cost calculation in the background so we don't block normal UI load.
+        // It scans the entire ~/.codex/sessions transcript corpus and can take several seconds.
+        if (_costTask == null || _costTask.IsCompleted)
+        {
+            if (_costTask?.IsCompletedSuccessfully == true)
+            {
+                _lastCostData = _costTask.Result;
+            }
+            _costTask = Task.Run(CodexCostCalculator.CalculateCostsAsync);
+        }
+
+        CodexCostDetailsData? costData = _lastCostData;
 
         CodexUsageResponse? usage = null;
         CodexRateLimitResetResponse? credits = null;
@@ -150,7 +169,8 @@ public sealed class CodexProvider : IUsageProvider
             ResetNote = resetNote,
             ResetCredits = resetCredits,
             Gauges = gauges,
-            ErrorMessage = errorMessage
+            ErrorMessage = errorMessage,
+            ExtensionData = costData
         };
     }
 

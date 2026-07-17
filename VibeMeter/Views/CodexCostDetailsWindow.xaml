@@ -1,0 +1,112 @@
+<Window x:Class="VibeMeter.Views.CodexCostDetailsWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:codex="clr-namespace:VibeMeter.Providers.Codex"
+        mc:Ignorable="d"
+        Title="Codex Cost Details"
+        WindowStyle="None"
+        AllowsTransparency="True"
+        Background="Transparent"
+        ShowInTaskbar="False"
+        WindowStartupLocation="CenterOwner"
+        Width="360" Height="500"
+        MouseDown="Window_MouseDown">
+
+    <Border CornerRadius="16" Background="#EB1A1A2E" BorderBrush="#40FFFFFF" BorderThickness="1" Padding="20">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
+            </Grid.RowDefinitions>
+
+            <DockPanel Grid.Row="0" Margin="0,0,0,16">
+                <TextBlock Text="Codex Breakdown" FontSize="16" FontWeight="SemiBold" Foreground="White" VerticalAlignment="Center"/>
+                <Button DockPanel.Dock="Right" HorizontalAlignment="Right"
+                        Click="CloseButton_Click" Background="Transparent" BorderThickness="0" Cursor="Hand" Foreground="#A0FFFFFF" FontSize="14" Padding="8,4">✕</Button>
+            </DockPanel>
+
+            <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,20">
+                <Border Background="#20FFFFFF" CornerRadius="10" Padding="12" Margin="0,0,10,0" Width="100">
+                    <StackPanel>
+                        <TextBlock Text="Today" FontSize="11" Foreground="#B0B0C0"/>
+                        <TextBlock Text="{Binding TodayTotalCostUsd, StringFormat=${0:F2}}" FontSize="18" FontWeight="Bold" Foreground="White" Margin="0,4,0,0"/>
+                        <TextBlock Text="{Binding TodayTotalTokens, StringFormat={}{0:N0} tokens}" FontSize="10" Foreground="#808090"/>
+                    </StackPanel>
+                </Border>
+                <Border Background="#20FFFFFF" CornerRadius="10" Padding="12" Margin="0,0,10,0" Width="100">
+                    <StackPanel>
+                        <TextBlock Text="5-Hour" FontSize="11" Foreground="#B0B0C0"/>
+                        <TextBlock Text="{Binding FiveHourCostUsd, StringFormat=${0:F2}}" FontSize="18" FontWeight="Bold" Foreground="White" Margin="0,4,0,0"/>
+                        <TextBlock Text="{Binding FiveHourTokens, StringFormat={}{0:N0} tokens}" FontSize="10" Foreground="#808090"/>
+                    </StackPanel>
+                </Border>
+                <Border Background="#20FFFFFF" CornerRadius="10" Padding="12" Width="100">
+                    <StackPanel>
+                        <TextBlock Text="7 Days" FontSize="11" Foreground="#B0B0C0"/>
+                        <TextBlock Text="{Binding WeekTotalCostUsd, StringFormat=${0:F2}}" FontSize="18" FontWeight="Bold" Foreground="White" Margin="0,4,0,0"/>
+                        <TextBlock Text="{Binding WeekTotalTokens, StringFormat={}{0:N0} tokens}" FontSize="10" Foreground="#808090"/>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+
+            <!-- Weekly cache metrics strip -->
+            <Border Grid.Row="2" Background="#1860A0C8" CornerRadius="10" Padding="10,8" Margin="0,0,0,16">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" HorizontalAlignment="Center">
+                        <TextBlock Text="Cached input" FontSize="9" Foreground="#80C8A0" HorizontalAlignment="Center"/>
+                        <TextBlock Text="{Binding WeekCachedInputTokens, StringFormat={}{0:N0}}" FontSize="13" FontWeight="Bold" Foreground="#60C873" HorizontalAlignment="Center"/>
+                    </StackPanel>
+                    <TextBlock Grid.Column="1" Text="│" Foreground="#30FFFFFF" VerticalAlignment="Center"/>
+                    <StackPanel Grid.Column="2" HorizontalAlignment="Center">
+                        <TextBlock Text="Full-rate input" FontSize="9" Foreground="#9090A0" HorizontalAlignment="Center"/>
+                        <TextBlock Text="{Binding WeekUncachedInputTokens, StringFormat={}{0:N0}}" FontSize="13" FontWeight="Bold" Foreground="#C0C0D0" HorizontalAlignment="Center"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto">
+                <StackPanel>
+                    <TextBlock Text="Weekly usage by model" FontSize="12" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,8"/>
+                    <ItemsControl ItemsSource="{Binding WeeklyModelCosts}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate DataType="{x:Type codex:CodexModelCost}">
+                                <Border Background="#10FFFFFF" CornerRadius="8" Padding="10" Margin="0,0,0,8">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="Auto"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0">
+                                            <TextBlock Text="{Binding ModelId}" FontSize="12" Foreground="White" FontWeight="SemiBold"/>
+                                            <TextBlock FontSize="10" Foreground="#9090A0" Margin="0,4,0,0">
+                                                <Run Text="In: "/><Run Text="{Binding InputTokens, StringFormat=N0}"/>
+                                                <Run Text=" | Out: "/><Run Text="{Binding OutputTokens, StringFormat=N0}"/>
+                                            </TextBlock>
+                                            <TextBlock FontSize="10" Foreground="#60C873" Margin="0,2,0,0">
+                                                <Run Text="Cached: "/><Run Text="{Binding CachedInputTokens, StringFormat=N0}"/>
+                                                <Run Text=" · Reasoning: "/><Run Text="{Binding ReasoningTokens, StringFormat=N0}"/>
+                                            </TextBlock>
+                                        </StackPanel>
+                                        <TextBlock Grid.Column="1" Text="{Binding TotalCostUsd, StringFormat=${0:F2}}" FontSize="14" FontWeight="Bold" Foreground="White" VerticalAlignment="Center"/>
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </StackPanel>
+            </ScrollViewer>
+
+            <TextBlock Grid.Row="4" Text="Estimated cost based on public OpenAI API rates" FontSize="10" Foreground="#606070" HorizontalAlignment="Center" Margin="0,10,0,0"/>
+        </Grid>
+    </Border>
+</Window>

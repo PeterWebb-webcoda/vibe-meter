@@ -7,6 +7,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using VibeMeter.Core;
 using VibeMeter.Models;
 using VibeMeter.Providers.Claude;
+using VibeMeter.Providers.Codex;
 
 namespace VibeMeter.ViewModels;
 
@@ -116,35 +117,55 @@ public sealed partial class ProviderViewModel : ObservableObject
 
     private void PopulateCostData(object? extensionData)
     {
-        if (extensionData is ClaudeCostDetailsData costData)
+        switch (extensionData)
         {
-            HasCostData = true;
-            TodayCostText = $"${costData.TodayTotalCostUsd:F2} today";
-            WeekCostText = $"${costData.WeekTotalCostUsd:F2} this week";
-            MonthCostText = $"${costData.MonthTotalCostUsd:F2} this month";
-            TodayTokensText = FormatTokens(costData.TodayTotalTokens) + " tokens";
+            case ClaudeCostDetailsData c:
+                PopulateFromCost(
+                    c.TodayTotalCostUsd, c.TodayTotalTokens,
+                    c.WeekTotalCostUsd, c.MonthTotalCostUsd,
+                    c.WeeklyModelCosts.Select(m => (m.ModelId, m.TotalCostUsd)));
+                break;
 
-            CostModelBreakdowns.Clear();
-            decimal totalWeekCost = costData.WeekTotalCostUsd > 0 ? costData.WeekTotalCostUsd : 1;
-            
-            // Only show top 3 to save space, or all if we want
-            foreach (var mc in costData.WeeklyModelCosts.Take(4))
-            {
-                if (mc.TotalCostUsd <= 0.01m) continue;
-                CostModelBreakdowns.Add(new CostModelBreakdownItem
-                {
-                    ModelName = mc.ModelId,
-                    CostText = $"${mc.TotalCostUsd:F2}",
-                    Percentage = (double)(mc.TotalCostUsd / totalWeekCost)
-                });
-            }
-        }
-        else
-        {
-            HasCostData = false;
-            CostModelBreakdowns.Clear();
+            case CodexCostDetailsData x:
+                PopulateFromCost(
+                    x.TodayTotalCostUsd, x.TodayTotalTokens,
+                    x.WeekTotalCostUsd, x.MonthTotalCostUsd,
+                    x.WeeklyModelCosts.Select(m => (m.ModelId, m.TotalCostUsd)));
+                break;
+
+            default:
+                HasCostData = false;
+                CostModelBreakdowns.Clear();
+                break;
         }
         OnPropertyChanged(nameof(ShowDetailsButton));
+    }
+
+    /// <summary>Shared populator — both Claude and Codex cost records carry the same shape.</summary>
+    private void PopulateFromCost(
+        decimal todayCost, long todayTokens,
+        decimal weekCost, decimal monthCost,
+        IEnumerable<(string ModelId, decimal TotalCostUsd)> weeklyModels)
+    {
+        HasCostData = true;
+        TodayCostText = $"${todayCost:F2} today";
+        WeekCostText = $"${weekCost:F2} this week";
+        MonthCostText = $"${monthCost:F2} this month";
+        TodayTokensText = FormatTokens(todayTokens) + " tokens";
+
+        CostModelBreakdowns.Clear();
+        decimal totalWeekCost = weekCost > 0 ? weekCost : 1;
+
+        foreach (var (modelId, modelCost) in weeklyModels.Take(4))
+        {
+            if (modelCost <= 0.01m) continue;
+            CostModelBreakdowns.Add(new CostModelBreakdownItem
+            {
+                ModelName = modelId,
+                CostText = $"${modelCost:F2}",
+                Percentage = (double)(modelCost / totalWeekCost)
+            });
+        }
     }
 
     private static string FormatTokens(long tokens)

@@ -110,10 +110,17 @@ public partial class MainWindow : Window
     private void DetailsButton_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not FrameworkElement { DataContext: ProviderViewModel vm }) return;
-        
-        if (vm.Id == "claude" && vm.ExtensionData != null)
+        if (vm.ExtensionData is null) return;
+
+        Window? window = vm.Id switch
         {
-            var window = new CostDetailsWindow(vm.ExtensionData);
+            "claude" => new CostDetailsWindow(vm.ExtensionData),
+            "codex"  => new CodexCostDetailsWindow(vm.ExtensionData),
+            _ => null
+        };
+
+        if (window is not null)
+        {
             window.Owner = this;
             window.ShowDialog();
         }
