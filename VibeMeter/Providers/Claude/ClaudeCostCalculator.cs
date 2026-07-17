@@ -26,6 +26,7 @@ public sealed class ClaudeCostCalculator
 
         decimal todayCost = 0, weekCost = 0, monthCost = 0, fiveHCost = 0;
         long todayTokens = 0, weekTokens = 0, monthTokens = 0, fiveHTokens = 0;
+        long weekCacheRead = 0, weekCacheWrite = 0, weekUncachedInput = 0;
 
         var weeklyModelStats = new Dictionary<string, ModelStats>();
 
@@ -92,6 +93,9 @@ public sealed class ClaudeCostCalculator
                         {
                             weekTokens += totalTokens;
                             weekCost += cost;
+                            weekCacheRead += cacheRead;
+                            weekCacheWrite += cacheWrite;
+                            weekUncachedInput += input;
 
                             if (!weeklyModelStats.TryGetValue(model, out var stats))
                             {
@@ -141,7 +145,12 @@ public sealed class ClaudeCostCalculator
             weekCost, weekTokens,
             monthCost, monthTokens,
             fiveHCost, fiveHTokens,
-            modelCosts);
+            modelCosts)
+        {
+            WeekCacheReadTokens = weekCacheRead,
+            WeekCacheWriteTokens = weekCacheWrite,
+            WeekUncachedInputTokens = weekUncachedInput,
+        };
     }
 
     private static decimal CalculateCost(string model, long input, long output, long cacheWrite, long cacheRead)

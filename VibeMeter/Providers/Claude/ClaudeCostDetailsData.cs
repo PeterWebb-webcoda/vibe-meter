@@ -19,4 +19,14 @@ public record ClaudeCostDetailsData(
     long MonthTotalTokens,
     decimal FiveHourCostUsd,
     long FiveHourTokens,
-    IReadOnlyList<ClaudeModelCost> WeeklyModelCosts);
+    IReadOnlyList<ClaudeModelCost> WeeklyModelCosts)
+{
+    /// <summary>Weekly cache-read tokens (served from cache, not reprocessed).</summary>
+    public long WeekCacheReadTokens { get; init; }
+
+    /// <summary>Weekly cache-write tokens (context written to cache for future reuse).</summary>
+    public long WeekCacheWriteTokens { get; init; }
+
+    /// <summary>Weekly input tokens that were NOT served from cache (reprocessed).</summary>
+    public long WeekUncachedInputTokens { get; init; }
+};

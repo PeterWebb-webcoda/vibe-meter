@@ -11,12 +11,13 @@
         Background="Transparent"
         ShowInTaskbar="False"
         WindowStartupLocation="CenterOwner"
-        Width="360" Height="440"
+        Width="360" Height="500"
         MouseDown="Window_MouseDown">
 
     <Border CornerRadius="16" Background="#EB1A1A2E" BorderBrush="#40FFFFFF" BorderThickness="1" Padding="20">
         <Grid>
             <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
@@ -53,7 +54,34 @@
                 </Border>
             </StackPanel>
 
-            <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto">
+            <!-- Weekly cache metrics strip -->
+            <Border Grid.Row="2" Background="#1860C873" CornerRadius="10" Padding="10,8" Margin="0,0,0,16">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" HorizontalAlignment="Center">
+                        <TextBlock Text="Cache read" FontSize="9" Foreground="#80C8A0" HorizontalAlignment="Center"/>
+                        <TextBlock Text="{Binding WeekCacheReadTokens, StringFormat={}{0:N0}}" FontSize="13" FontWeight="Bold" Foreground="#60C873" HorizontalAlignment="Center"/>
+                    </StackPanel>
+                    <TextBlock Grid.Column="1" Text="│" Foreground="#30FFFFFF" VerticalAlignment="Center"/>
+                    <StackPanel Grid.Column="2" HorizontalAlignment="Center">
+                        <TextBlock Text="Cache write" FontSize="9" Foreground="#80A0C8" HorizontalAlignment="Center"/>
+                        <TextBlock Text="{Binding WeekCacheWriteTokens, StringFormat={}{0:N0}}" FontSize="13" FontWeight="Bold" Foreground="#60A0C8" HorizontalAlignment="Center"/>
+                    </StackPanel>
+                    <TextBlock Grid.Column="3" Text="│" Foreground="#30FFFFFF" VerticalAlignment="Center"/>
+                    <StackPanel Grid.Column="4" HorizontalAlignment="Center">
+                        <TextBlock Text="Re-processed" FontSize="9" Foreground="#9090A0" HorizontalAlignment="Center"/>
+                        <TextBlock Text="{Binding WeekUncachedInputTokens, StringFormat={}{0:N0}}" FontSize="13" FontWeight="Bold" Foreground="#C0C0D0" HorizontalAlignment="Center"/>
+                    </StackPanel>
+                </Grid>
+            </Border>
+
+            <ScrollViewer Grid.Row="3" VerticalScrollBarVisibility="Auto">
                 <StackPanel>
                     <TextBlock Text="Weekly usage by model" FontSize="12" FontWeight="SemiBold" Foreground="White" Margin="0,0,0,8"/>
                     <ItemsControl ItemsSource="{Binding WeeklyModelCosts}">
@@ -72,7 +100,8 @@
                                                 <Run Text=" | Out: "/><Run Text="{Binding OutputTokens, StringFormat=N0}"/>
                                             </TextBlock>
                                             <TextBlock FontSize="10" Foreground="#60C873" Margin="0,2,0,0">
-                                                <Run Text="Cache saved (read): "/><Run Text="{Binding CacheReadTokens, StringFormat=N0}"/>
+                                                <Run Text="Cache read: "/><Run Text="{Binding CacheReadTokens, StringFormat=N0}"/>
+                                                <Run Text=" · write: "/><Run Text="{Binding CacheWriteTokens, StringFormat=N0}"/>
                                             </TextBlock>
                                         </StackPanel>
                                         <TextBlock Grid.Column="1" Text="{Binding TotalCostUsd, StringFormat=${0:F2}}" FontSize="14" FontWeight="Bold" Foreground="White" VerticalAlignment="Center"/>
@@ -84,7 +113,7 @@
                 </StackPanel>
             </ScrollViewer>
             
-            <TextBlock Grid.Row="3" Text="Based on estimated API pricing via LiteLLM" FontSize="10" Foreground="#606070" HorizontalAlignment="Center" Margin="0,10,0,0"/>
+            <TextBlock Grid.Row="4" Text="Based on estimated API pricing via LiteLLM" FontSize="10" Foreground="#606070" HorizontalAlignment="Center" Margin="0,10,0,0"/>
         </Grid>
     </Border>
 </Window>
