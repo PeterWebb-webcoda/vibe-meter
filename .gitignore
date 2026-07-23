@@ -54,6 +54,13 @@ temp/
 publish/
 *.zip
 
+## Local publish / intermediate staging dirs (used to work around AV-locked obj)
+.publish-*/
+.publish-test/
+.publish-frameworkdep/
+.obj-fresh*/
+.obj-fresh-base/
+
 ## Local AI-tooling configs (Webcoda-internal, not part of the app)
 .claude/
 .opencode/
