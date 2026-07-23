@@ -78,9 +78,15 @@ public sealed class ClaudeProvider : IUsageProvider
         // It reads many JSONL files and can take 1-2 seconds.
         if (_costTask == null || _costTask.IsCompleted)
         {
-            if (_costTask?.IsCompletedSuccessfully == true)
+            if (_costTask?.IsCompletedSuccessfully == true && _costTask.Result is { } fresh)
             {
-                _lastCostData = _costTask.Result;
+                // High-water-mark guard: token spend is monotonic within a window, so a
+                // fresh result lower than the cached one is a measurement artifact (the
+                // calc raced with Claude Code appending to a live transcript). Keep the
+                // higher totals rather than letting the UI tick backwards.
+                _lastCostData = _lastCostData is { } prev
+                    ? fresh.WithMonotonicFloor(prev)
+                    : fresh;
             }
             _costTask = Task.Run(() => ClaudeCostCalculator.CalculateCostsAsync());
         }

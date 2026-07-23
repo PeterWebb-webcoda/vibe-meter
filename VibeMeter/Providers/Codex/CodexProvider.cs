@@ -62,9 +62,18 @@ public sealed class CodexProvider : IUsageProvider
         // It scans the entire ~/.codex/sessions transcript corpus and can take several seconds.
         if (_costTask == null || _costTask.IsCompleted)
         {
-            if (_costTask?.IsCompletedSuccessfully == true)
+            if (_costTask?.IsCompletedSuccessfully == true && _costTask.Result is { } fresh)
             {
-                _lastCostData = _costTask.Result;
+                // High-water-mark guard: token spend is monotonic within a window, so a
+                // fresh result lower than the cached one is a measurement artifact (the
+                // calc raced with Codex appending to a live session file and read a
+                // partial line). Keep the higher totals rather than letting the UI tick
+                // backwards. The guard is per-field so a reset on a longer window (e.g.
+                // the 5h bucket aging out) can still take effect without the today/week
+                // values flickering.
+                _lastCostData = _lastCostData is { } prev
+                    ? fresh.WithMonotonicFloor(prev)
+                    : fresh;
             }
             _costTask = Task.Run(CodexCostCalculator.CalculateCostsAsync);
         }
