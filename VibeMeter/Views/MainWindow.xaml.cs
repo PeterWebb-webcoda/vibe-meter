@@ -1,5 +1,7 @@
+using System;
 using System.ComponentModel;
 using System.Windows;
+using Microsoft.Win32;
 using System.Windows.Input;
 using VibeMeter.Services;
 using VibeMeter.ViewModels;
@@ -28,6 +30,11 @@ public partial class MainWindow : Window
     {
         ApplyCompactLayout(_viewModel.CompactMode);
         ResetPosition();
+        // When the display layout changes (monitor connected/disconnected, DPI change,
+        // resolution change), re-clamp into the visible work area so the window doesn't
+        // end up on a now-disconnected screen. We deliberately do NOT clamp on every
+        // LocationChanged — that would prevent the user dragging across monitors.
+        SystemEvents.DisplaySettingsChanged += (_, _) => Dispatcher.Invoke(ClampToWorkArea);
     }
 
     private void ViewModel_PropertyChanged(object? sender, PropertyChangedEventArgs e)
@@ -75,9 +82,45 @@ public partial class MainWindow : Window
     public void ResetPosition()
     {
         var workArea = SystemParameters.WorkArea;
-        Left = workArea.Right - ActualWidth - 18;
-        Top = workArea.Bottom - ActualHeight - 18;
+        // ActualWidth/Height are 0 before the first layout pass — fall back to the
+        // designed dimensions so the window doesn't land at the very corner.
+        double w = ActualWidth > 0 ? ActualWidth : (CompactMode ? 220 : FullWidth);
+        double h = ActualHeight > 0 ? ActualHeight : (CompactMode ? 360 : FullHeight);
+        Left = workArea.Right - w - 18;
+        Top = workArea.Bottom - h - 18;
     }
+
+    /// <summary>
+    /// Nudges the window back inside the nearest monitor's work area if any edge has
+    /// slipped off-screen (e.g. an external monitor was disconnected while the window
+    /// was on it). No-op when already on-screen.
+    /// </summary>
+    private void ClampToWorkArea()
+    {
+        var workArea = SystemParameters.WorkArea;
+        double w = ActualWidth > 0 ? ActualWidth : Width;
+        double h = ActualHeight > 0 ? ActualHeight : Height;
+        if (w <= 0 || h <= 0) return;
+
+        double newLeft = Left;
+        double newTop = Top;
+
+        // Off the right or left edge → pull onto the nearest horizontal edge.
+        if (newLeft + w < workArea.Left + 40) newLeft = workArea.Left + 18;
+        else if (newLeft > workArea.Right - 40) newLeft = workArea.Right - w - 18;
+
+        // Off the bottom or top edge → pull onto the nearest vertical edge.
+        if (newTop + h < workArea.Top + 40) newTop = workArea.Top + 18;
+        else if (newTop > workArea.Bottom - 40) newTop = workArea.Bottom - h - 18;
+
+        if (Math.Abs(newLeft - Left) > 0.5 || Math.Abs(newTop - Top) > 0.5)
+        {
+            Left = newLeft;
+            Top = newTop;
+        }
+    }
+
+    private bool CompactMode => _viewModel.CompactMode;
 
     private void ResetPositionButton_Click(object sender, RoutedEventArgs e) => ResetPosition();
 

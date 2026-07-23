@@ -46,7 +46,9 @@ public sealed class CodexCostCalculator
         var monthAgo = now.AddDays(-30);
         var weekAgo = now.AddDays(-7);
         var fiveHoursAgo = now.AddHours(-5);
-        var today = now.Date;
+        // "Today" rolls over at local midnight, not UTC midnight (otherwise AEST users
+        // see the counter reset at 10am). Compare timestamps converted to local.
+        var todayLocal = TimeZoneInfo.ConvertTimeFromUtc(now, TimeZoneInfo.Local).Date;
 
         decimal todayCost = 0, weekCost = 0, monthCost = 0, fiveHCost = 0;
         long todayTokens = 0, weekTokens = 0, monthTokens = 0, fiveHTokens = 0;
@@ -165,8 +167,8 @@ public sealed class CodexCostCalculator
                         stats.Cost += cost;
                     }
 
-                    // Today aggregation
-                    if (utcTs.Date == today)
+                    // Today aggregation (local-midnight boundary)
+                    if (TimeZoneInfo.ConvertTimeFromUtc(utcTs, TimeZoneInfo.Local).Date == todayLocal)
                     {
                         todayTokens += totalTokens;
                         todayCost += cost;
