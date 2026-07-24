@@ -31,7 +31,9 @@ public partial class MainViewModel : ObservableObject
 
     [ObservableProperty] private bool _autoRefreshEnabled = true;
 
-    [ObservableProperty] private int _refreshIntervalSeconds = 60;
+    // 5 min default: usage data barely moves in 60s, and the cost calculators scan the
+    // full transcript corpus on each refresh. User-configurable via Settings.
+    [ObservableProperty] private int _refreshIntervalSeconds = 300;
 
     [ObservableProperty] private int _tintIndex;
 
