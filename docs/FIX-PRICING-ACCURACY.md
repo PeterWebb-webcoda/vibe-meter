@@ -151,6 +151,51 @@ table so a pricing change busts it. **Without this, the fix appears not to work.
 
 ## Verification
 
-After the change, the weekly Claude figure on this account should drop from roughly $3,806 to
-roughly $1,380, with `claude-opus-4-8` landing near $925 and `claude-opus-5` near $268. If it
-doesn't move at all, you've hit the cache trap above.
+> **Resolved 27/07/2026 in `25f6bb2`.** The original targets in this section were wrong — they
+> were derived from the buggy cost basis described in Bug 6 below, which was not known when this
+> brief was written. They predicted the weekly figure dropping to ~$1,380. **Do not "fix" the
+> calculator to hit that number.** Corrected figures follow.
+
+Measured before/after on a fixed corpus (by running the pre-fix code against the same transcripts,
+not by comparing against an earlier snapshot — the rolling window moves as you work, so a
+wall-clock comparison is not a valid test):
+
+| | before | after |
+|---|---|---|
+| weekly total | $3,917.80 | $3,780.16 |
+| `claude-opus-4-8` | $2,788.18 | $2,194.84 |
+| `claude-opus-5` | $928.61 | $801.09 |
+| `claude-sonnet-5` | $113.70 | $467.97 |
+| `claude-fable-5` | $42.73 | $251.81 |
+
+The rate fix on its own would have produced roughly the originally-predicted numbers
+(Opus 4.8 ≈ $929). Correctly charging cache reads — Bug 6 — fills the difference back in, and
+Sonnet 5 rises rather than falls because its cache-read volume is large (1.96B tokens) relative
+to its other usage.
+
+**If the numbers do not move at all**, you have hit the cache trap above: `FileEntry` must not
+store a computed cost.
+
+---
+
+## Bug 6 (found while implementing; not in the original brief): cache reads were never billed
+
+The pre-fix `CalculateCost` contained:
+
+```csharp
+decimal inputCost = ((input - cacheRead) / 1_000_000m) * inPrice + (cacheRead / 1_000_000m) * crPrice;
+if (inputCost < 0) inputCost = (input / 1_000_000m) * inPrice; // fallback if cacheRead > input logic is weird
+```
+
+This assumed `input_tokens` was inclusive of cache reads. It is not — in Anthropic's usage block
+`input_tokens` is already the **uncached remainder**, and `cache_read_input_tokens` /
+`cache_creation_input_tokens` are reported separately (total prompt size is the sum of all three).
+So the subtraction went hugely negative — 1.7M − 2,531M on `claude-opus-4-8` — the negative guard
+fired, and **every cent of cache-read cost was silently discarded**.
+
+That mattered more than any rate error in the brief: cache reads are by far the largest token
+volume (2.53B read vs 110M written vs 1.7M uncached input on Opus 4.8 alone), and Anthropic bills
+them at 0.1× input. On that one model it was $1,265.45 of invisible cost.
+
+Fixed by pricing each bucket independently against its own rate, with no subtraction. The
+comment at `CalculateCost` documents the token semantics so the assumption isn't reintroduced.
