@@ -9,7 +9,8 @@ public record ClaudeModelCost(
     long OutputTokens,
     long CacheWriteTokens,
     long CacheReadTokens,
-    decimal TotalCostUsd);
+    decimal TotalCostUsd,
+    bool IsEstimatedRate = false);
 
 public record ClaudeCostDetailsData(
     decimal TodayTotalCostUsd,

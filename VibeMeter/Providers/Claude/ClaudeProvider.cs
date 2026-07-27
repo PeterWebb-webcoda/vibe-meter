@@ -105,7 +105,7 @@ public sealed class ClaudeProvider : IUsageProvider
                 Subtitle: DisplayName,
                 PercentRemaining: RemainingFrom(fiveHour.UsedPercent),
                 ResetAt: fiveHour.ResetAt,
-                TooltipText: costData != null ? $"Cost in last 5h: ${costData.FiveHourCostUsd:F2} ({costData.FiveHourTokens:N0} tokens)" : null));
+                TooltipText: costData != null ? $"Cost in last 5h: ${costData.FiveHourCostUsd:F2} ({costData.FiveHourTokens:N0} billed tokens)" : null));
         }
 
         if (data?.SevenDay is { } sevenDay)
@@ -116,7 +116,7 @@ public sealed class ClaudeProvider : IUsageProvider
                 Subtitle: DisplayName,
                 PercentRemaining: RemainingFrom(sevenDay.UsedPercent),
                 ResetAt: sevenDay.ResetAt,
-                TooltipText: costData != null ? $"Cost in last 7 days: ${costData.WeekTotalCostUsd:F2} ({costData.WeekTotalTokens:N0} tokens)" : null));
+                TooltipText: costData != null ? $"Cost in last 7 days: ${costData.WeekTotalCostUsd:F2} ({costData.WeekTotalTokens:N0} billed tokens)" : null));
         }
 
         // Model-scoped weekly limits (e.g. a separate Fable 5 allowance) show up as

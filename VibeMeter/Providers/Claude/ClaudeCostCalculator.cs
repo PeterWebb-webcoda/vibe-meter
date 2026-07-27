@@ -18,9 +18,16 @@ namespace VibeMeter.Providers.Claude;
 /// varies per record), and optionally a transcript-native <c>costUSD</c>.
 /// </para>
 /// <para>
+/// <b>Pricing:</b> cost is computed at fold time from a dated, explicit rate table — see
+/// <see cref="RateTable"/> and <see cref="ResolveRate"/>. On this machine Claude Code
+/// transcripts carry <b>no</b> <c>costUSD</c> field, so the table does 100% of the work.
+/// </para>
+/// <para>
 /// <b>Performance:</b> to avoid re-reading the whole corpus every refresh, each file's
 /// parsed records are cached keyed on its <c>LastWriteTimeUtc</c>. Only files whose mtime
-/// changed are re-parsed; the rest are re-folded from cache.
+/// changed are re-parsed; the rest are re-folded from cache. The cache stores <b>raw token
+/// counts only</b> — cost is derived at fold time — so a rate-table change takes effect on
+/// the next fold without needing to bust the cache (see the FIX-PRICING-ACCURACY brief).
 /// </para>
 /// </remarks>
 public sealed class ClaudeCostCalculator
@@ -68,12 +75,16 @@ public sealed class ClaudeCostCalculator
             foreach (var p in stale) FileCache.Remove(p);
         }
 
-        // 4. Re-fold all cached entries into fresh aggregates.
+        // 4. Re-fold all cached entries into fresh aggregates. Cost is computed here, not
+        //    at parse time, so the current rate table is always applied (cache-trap fix).
         var now = DateTime.UtcNow;
         var monthAgo = now.AddDays(-30);
         var weekAgo = now.AddDays(-7);
         var fiveHoursAgo = now.AddHours(-5);
         var todayLocal = TimeZoneInfo.ConvertTimeFromUtc(now, TimeZoneInfo.Local).Date;
+
+        // Per-model resolved rates, memoised so the 500k-record fold stays sub-second.
+        var resolvedRates = new Dictionary<string, (string MatchedId, ModelRate Rate, bool Estimated)>(StringComparer.Ordinal);
 
         decimal todayCost = 0, weekCost = 0, monthCost = 0, fiveHCost = 0;
         long todayTokens = 0, weekTokens = 0, monthTokens = 0, fiveHTokens = 0;
@@ -86,44 +97,59 @@ public sealed class ClaudeCostCalculator
             {
                 if (r.TimestampUtc < monthAgo) continue;
 
-                long totalTokens = r.Input + r.Output + r.CacheWrite + r.CacheRead;
+                // Headline token count = tokens billed at a non-trivial rate, i.e. it
+                // excludes cache READS (near-free reuse at 0.1x). Cache WRITES are included
+                // — they're new context billed at 1.25x. This matches the Codex headline
+                // definition so the two provider panels compare honestly. See Bug 3.
+                long cacheWriteTotal = r.CacheWrite5m + r.CacheWrite1h;
+                long totalTokens = r.Input + r.Output + cacheWriteTotal;
+
+                if (!resolvedRates.TryGetValue(r.Model, out var resolved))
+                {
+                    resolved = ResolveRate(r.Model);
+                    resolvedRates[r.Model] = resolved;
+                }
+                decimal cost = r.NativeCostUsd
+                    ?? CalculateCost(resolved.MatchedId, resolved.Rate,
+                                     r.Input, r.Output, r.CacheWrite5m, r.CacheWrite1h, r.CacheRead,
+                                     r.TimestampUtc);
 
                 // Monthly aggregation
                 monthTokens += totalTokens;
-                monthCost += r.Cost;
+                monthCost += cost;
 
                 if (r.TimestampUtc >= weekAgo)
                 {
                     weekTokens += totalTokens;
-                    weekCost += r.Cost;
+                    weekCost += cost;
                     weekCacheRead += r.CacheRead;
-                    weekCacheWrite += r.CacheWrite;
+                    weekCacheWrite += cacheWriteTotal;
                     weekUncachedInput += r.Input;
 
                     if (!weeklyModelStats.TryGetValue(r.Model, out var stats))
                     {
-                        stats = new ModelStats();
+                        stats = new ModelStats { IsEstimated = resolved.Estimated };
                         weeklyModelStats[r.Model] = stats;
                     }
                     stats.Input += r.Input;
                     stats.Output += r.Output;
-                    stats.CacheWrite += r.CacheWrite;
+                    stats.CacheWrite += cacheWriteTotal;
                     stats.CacheRead += r.CacheRead;
-                    stats.Cost += r.Cost;
+                    stats.Cost += cost;
                 }
 
                 // Today (local-midnight boundary)
                 if (TimeZoneInfo.ConvertTimeFromUtc(r.TimestampUtc, TimeZoneInfo.Local).Date == todayLocal)
                 {
                     todayTokens += totalTokens;
-                    todayCost += r.Cost;
+                    todayCost += cost;
                 }
 
                 // 5h
                 if (r.TimestampUtc >= fiveHoursAgo)
                 {
                     fiveHTokens += totalTokens;
-                    fiveHCost += r.Cost;
+                    fiveHCost += cost;
                 }
             }
         }
@@ -134,8 +160,8 @@ public sealed class ClaudeCostCalculator
             kvp.Value.Output,
             kvp.Value.CacheWrite,
             kvp.Value.CacheRead,
-            kvp.Value.Cost
-        )).OrderByDescending(m => m.TotalCostUsd).ToList();
+            kvp.Value.Cost,
+            kvp.Value.IsEstimated)).OrderByDescending(m => m.TotalCostUsd).ToList();
 
         return new ClaudeCostDetailsData(
             todayCost, todayTokens,
@@ -152,9 +178,8 @@ public sealed class ClaudeCostCalculator
 
     /// <summary>
     /// Parses one transcript file into a list of per-record usage entries. The model and
-    /// the resolved cost are captured per record (Claude's model varies per line, and cost
-    /// prefers a native <c>costUSD</c> when present). Records older than 30 days are
-    /// dropped — they can never re-enter any window.
+    /// raw token counts are captured per record (Claude's model varies per line). Records
+    /// older than 30 days are dropped — they can never re-enter any window.
     /// </summary>
     private static async Task<List<FileEntry>> ParseFileAsync(string path)
     {
@@ -196,21 +221,35 @@ public sealed class ClaudeCostCalculator
 
                 string model = msgEl.TryGetProperty("model", out var modelEl) ? modelEl.GetString() ?? "unknown" : "unknown";
 
-                long input = 0, output = 0, cacheWrite = 0, cacheRead = 0;
+                long input = 0, output = 0, cacheRead = 0, cw5m = 0, cw1h = 0;
                 if (msgEl.TryGetProperty("usage", out var usageEl))
                 {
-                    input = usageEl.TryGetProperty("input_tokens", out var it) ? it.GetInt32() : 0;
-                    output = usageEl.TryGetProperty("output_tokens", out var ot) ? ot.GetInt32() : 0;
-                    cacheWrite = usageEl.TryGetProperty("cache_creation_input_tokens", out var cct) ? cct.GetInt32() : 0;
-                    cacheRead = usageEl.TryGetProperty("cache_read_input_tokens", out var crt) ? crt.GetInt32() : 0;
+                    input = usageEl.TryGetProperty("input_tokens", out var it) ? ReadLong(it) : 0;
+                    output = usageEl.TryGetProperty("output_tokens", out var ot) ? ReadLong(ot) : 0;
+                    cacheRead = usageEl.TryGetProperty("cache_read_input_tokens", out var crt) ? ReadLong(crt) : 0;
+
+                    // Cache creation comes either as a single bucket (cache_creation_input_tokens)
+                    // or, in newer transcripts, split by TTL under cache_creation. If the split is
+                    // present we price each tier; otherwise the whole bucket is treated as 5-minute
+                    // writes (the common Claude Code case) — see Bug 5 in the fix brief.
+                    long cwTotal = usageEl.TryGetProperty("cache_creation_input_tokens", out var cct) ? ReadLong(cct) : 0;
+                    if (usageEl.TryGetProperty("cache_creation", out var cc) && cc.ValueKind == JsonValueKind.Object)
+                    {
+                        cw5m = cc.TryGetProperty("ephemeral_5m_tokens", out var m5) ? ReadLong(m5) : 0;
+                        cw1h = cc.TryGetProperty("ephemeral_1h_tokens", out var h1) ? ReadLong(h1) : 0;
+                    }
+                    if (cw5m == 0 && cw1h == 0) cw5m = cwTotal;
                 }
 
-                // Prefer the transcript-native costUSD; fall back to the pricing table.
-                decimal cost = root.TryGetProperty("costUSD", out var costEl) && costEl.TryGetDecimal(out var parsedCost)
+                // Prefer the transcript-native costUSD when present; the rate table is the
+                // fallback (and on this machine does 100% of the work). The cost itself is
+                // resolved at fold time, so a stale rate table never survives a re-fold.
+                decimal? nativeCost = root.TryGetProperty("costUSD", out var costEl) &&
+                                      costEl.TryGetDecimal(out var parsedCost)
                     ? parsedCost
-                    : CalculateCost(model, input, output, cacheWrite, cacheRead);
+                    : null;
 
-                records.Add(new FileEntry(utcTs, model, input, output, cacheWrite, cacheRead, cost));
+                records.Add(new FileEntry(utcTs, model, input, output, cw5m, cw1h, cacheRead, nativeCost));
             }
         }
         catch
@@ -221,50 +260,140 @@ public sealed class ClaudeCostCalculator
         return records;
     }
 
-    private static decimal CalculateCost(string model, long input, long output, long cacheWrite, long cacheRead)
+    private static long ReadLong(JsonElement el) =>
+        el.ValueKind == JsonValueKind.Number && el.TryGetInt64(out var v) ? v : 0;
+
+    // --- Pricing ----------------------------------------------------------------
+
+    /// <summary>
+    /// Anthropic published-rate source. Every table entry is verified against this page.
+    /// </summary>
+    private const string PricingSource = "https://platform.claude.com/docs/en/about-claude/models/overview";
+
+    /// <summary>All rates verified 27/07/2026 against <see cref="PricingSource"/>.</summary>
+    private const string LastVerified = "2026-07-27";
+
+    /// <summary>
+    /// Sonnet 5 introductory pricing of $2 in / $10 out applies through 2026-08-31; the
+    /// standard $3 / $15 rate applies from 2026-09-01. Because cost is computed at fold
+    /// time where the per-record timestamp is available, each record is billed by its own
+    /// date — so every record inside the current rolling 7-day window bills at the intro
+    /// rate, and the switchover happens automatically as records age past 1 Sept.
+    /// </summary>
+    private static readonly DateTime Sonnet5StandardDate = new(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc);
+
+    /// <summary>
+    /// One model's per-million-token rates. Cache ratios follow Anthropic's standard:
+    /// write 5m = 1.25x input, write 1h = 2x input, read = 0.1x input.
+    /// </summary>
+    /// <param name="IsVerified"><c>false</c> marks a rate as an unverified estimate so the
+    /// UI can flag it (Bug 4) — every Claude entry below is verified.</param>
+    private readonly record struct ModelRate(
+        decimal Input,
+        decimal Output,
+        decimal CacheWrite5m,
+        decimal CacheWrite1h,
+        decimal CacheRead,
+        bool IsVerified);
+
+    /// <summary>
+    /// Explicit, dated rate table keyed on canonical model ids — NOT family-word
+    /// substrings. A generation that reprices will not silently inherit the old rate:
+    /// an unknown id falls through to <see cref="ResolveRate"/>'s estimated fallback
+    /// (Bug 2). Match order is longest-id-first so <c>claude-opus-4-8</c> wins over any
+    /// shorter prefix even when a transcript id carries a date suffix.
+    /// </summary>
+    private static readonly (string Id, ModelRate Rate)[] RateTable =
+        new (string Id, ModelRate Rate)[]
+        {
+            ("claude-opus-5",     new ModelRate(5.00m,  25.00m, 6.25m, 10.00m, 0.50m, true)),
+            ("claude-opus-4-8",   new ModelRate(5.00m,  25.00m, 6.25m, 10.00m, 0.50m, true)),
+            ("claude-opus-4-7",   new ModelRate(5.00m,  25.00m, 6.25m, 10.00m, 0.50m, true)),
+            ("claude-opus-4-6",   new ModelRate(5.00m,  25.00m, 6.25m, 10.00m, 0.50m, true)),
+            // Fable 5 is NOT Sonnet-priced: $10 in / $50 out — over 3x Sonnet, 2x Opus.
+            ("claude-fable-5",    new ModelRate(10.00m, 50.00m, 12.50m, 20.00m, 1.00m, true)),
+            ("claude-sonnet-5",   new ModelRate(3.00m,  15.00m, 3.75m,  6.00m,  0.30m, true)),
+            ("claude-sonnet-4-6", new ModelRate(3.00m,  15.00m, 3.75m,  6.00m,  0.30m, true)),
+            ("claude-haiku-4-5",  new ModelRate(1.00m,  5.00m,  1.25m,  2.00m,  0.10m, true)),
+        }
+        .OrderByDescending(t => t.Id.Length)
+        .ToArray();
+
+    /// <summary>Sonnet rates used as the estimated fallback for unknown models.</summary>
+    private static readonly ModelRate FallbackRate =
+        new ModelRate(3.00m, 15.00m, 3.75m, 6.00m, 0.30m, IsVerified: false);
+
+    /// <summary>
+    /// Resolves a transcript model string to its rate. Returns the matched table id, the
+    /// rate, and whether it should be flagged as an estimated/estimated rate in the UI.
+    /// Unknown models fall back to Sonnet pricing AND are flagged estimated (loud, not
+    /// silent — Bug 2).
+    /// </summary>
+    private static (string MatchedId, ModelRate Rate, bool Estimated) ResolveRate(string model)
     {
-        // Simple fallback pricing based on LiteLLM rates (per 1M tokens)
-        decimal inPrice = 3.00m;
-        decimal outPrice = 15.00m;
-        decimal cwPrice = 3.75m;
-        decimal crPrice = 0.30m;
+        var lower = model.ToLowerInvariant();
+        foreach (var (id, rate) in RateTable) // longest-id-first
+        {
+            if (lower.Contains(id, StringComparison.Ordinal))
+                return (id, rate, Estimated: !rate.IsVerified);
+        }
+        return ("(estimated)", FallbackRate, Estimated: true);
+    }
 
-        if (model.Contains("opus", StringComparison.OrdinalIgnoreCase))
+    /// <summary>
+    /// Computes per-record cost in USD from the resolved rate and raw token counts.
+    /// <para>
+    /// <c>input_tokens</c> in Anthropic's usage block is already the uncached portion, so
+    /// it bills at the full input rate; cache reads bill separately at 0.1x. Cache writes
+    /// are split by TTL when the transcript provides the breakdown (Bug 5).
+    /// </para>
+    /// </summary>
+    private static decimal CalculateCost(
+        string matchedId,
+        in ModelRate rate,
+        long input,
+        long output,
+        long cacheWrite5m,
+        long cacheWrite1h,
+        long cacheRead,
+        DateTime timestampUtc)
+    {
+        decimal inPrice = rate.Input;
+        decimal outPrice = rate.Output;
+        decimal cw5mPrice = rate.CacheWrite5m;
+        decimal cw1hPrice = rate.CacheWrite1h;
+        decimal crPrice = rate.CacheRead;
+
+        // Sonnet 5 introductory pricing — see Sonnet5StandardDate. Cache ratios still
+        // hold against the intro input rate, so re-derive the cache prices from it.
+        if (matchedId == "claude-sonnet-5" && timestampUtc < Sonnet5StandardDate)
         {
-            inPrice = 15.00m; outPrice = 75.00m; cwPrice = 18.75m; crPrice = 1.50m;
-        }
-        else if (model.Contains("haiku", StringComparison.OrdinalIgnoreCase))
-        {
-            inPrice = 0.80m; outPrice = 4.00m; cwPrice = 1.00m; crPrice = 0.08m;
-        }
-        else if (model.Contains("sonnet", StringComparison.OrdinalIgnoreCase))
-        {
-            inPrice = 3.00m; outPrice = 15.00m; cwPrice = 3.75m; crPrice = 0.30m;
-        }
-        else if (model.Contains("fable", StringComparison.OrdinalIgnoreCase))
-        {
-            // Fable pricing is currently roughly the same as sonnet in general, assuming defaults here.
-            inPrice = 3.00m; outPrice = 15.00m; cwPrice = 3.75m; crPrice = 0.30m;
+            inPrice = 2.00m;
+            outPrice = 10.00m;
+            cw5mPrice = inPrice * 1.25m;
+            cw1hPrice = inPrice * 2.00m;
+            crPrice = inPrice * 0.10m;
         }
 
-        decimal inputCost = ((input - cacheRead) / 1_000_000m) * inPrice + (cacheRead / 1_000_000m) * crPrice;
-        if (inputCost < 0) inputCost = (input / 1_000_000m) * inPrice; // fallback if cacheRead > input logic is weird
-
+        decimal inputCost = (input / 1_000_000m) * inPrice
+                          + (cacheRead / 1_000_000m) * crPrice;
         decimal outputCost = (output / 1_000_000m) * outPrice;
-        decimal cacheWriteCost = (cacheWrite / 1_000_000m) * cwPrice;
+        decimal cacheWriteCost = (cacheWrite5m / 1_000_000m) * cw5mPrice
+                               + (cacheWrite1h / 1_000_000m) * cw1hPrice;
 
         return inputCost + outputCost + cacheWriteCost;
     }
 
-    /// <summary>One per-record usage entry, cached. Model + cost are per-record for Claude.</summary>
+    /// <summary>One per-record usage entry, cached. Raw tokens only — cost is derived at fold.</summary>
     private sealed record FileEntry(
         DateTime TimestampUtc,
         string Model,
         long Input,
         long Output,
-        long CacheWrite,
+        long CacheWrite5m,
+        long CacheWrite1h,
         long CacheRead,
-        decimal Cost);
+        decimal? NativeCostUsd);
 
     /// <summary>Cache value: the file's mtime when parsed and its records.</summary>
     private sealed class FileCacheEntry
@@ -285,5 +414,7 @@ public sealed class ClaudeCostCalculator
         public long CacheWrite;
         public long CacheRead;
         public decimal Cost;
+        /// <summary>True when the model's rate is an estimate (unknown or unverified).</summary>
+        public bool IsEstimated;
     }
 }

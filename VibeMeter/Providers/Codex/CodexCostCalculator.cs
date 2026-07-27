@@ -28,11 +28,16 @@ namespace VibeMeter.Providers.Codex;
 /// each file's parsed records are cached keyed on its <c>LastWriteTimeUtc</c>. Only files
 /// whose mtime changed (i.e. a live session is appending) are re-parsed; the rest are
 /// re-folded from cache. Lines are also substring-prefiltered before JSON parsing so the
-/// giant <c>session_meta</c>/message lines are skipped cheaply.
+/// giant <c>session_meta</c>/message lines are skipped cheaply. The cache stores <b>raw
+/// token counts only</b> — cost is derived at fold time — so a rate-table change takes
+/// effect on the next fold without needing to bust the cache (see the FIX-PRICING-ACCURACY
+/// brief).
 /// </para>
 /// <para><b>Costs are estimates.</b> Codex transcripts carry no per-request $ figure
 /// (unlike Claude's <c>costUSD</c>), so costs are computed from a best-known pricing
-/// table — see <see cref="CalculateCost"/>. Reasoning output is billed at the output rate.</para>
+/// table — see <see cref="ResolveRate"/>. Reasoning output is billed at the output rate.
+/// <b>No Codex/OpenAI rate has been independently verified</b> as of 27/07/2026, so every
+/// rate is flagged estimated and the UI marks it accordingly.</para>
 /// </remarks>
 public sealed class CodexCostCalculator
 {
@@ -85,6 +90,8 @@ public sealed class CodexCostCalculator
         // 4. Re-fold all cached entries into fresh aggregates. The fold is pure and the
         //    time-window predicates are re-evaluated, so records age out of windows
         //    naturally as wall-clock advances. For a 500k-record corpus this is sub-second.
+        //    Cost is computed here (not at parse time) so the current rate table always
+        //    applies — cache-trap fix per the FIX-PRICING-ACCURACY brief.
         var now = DateTime.UtcNow;
         var monthAgo = now.AddDays(-30);
         var weekAgo = now.AddDays(-7);
@@ -95,51 +102,61 @@ public sealed class CodexCostCalculator
         long todayTokens = 0, weekTokens = 0, monthTokens = 0, fiveHTokens = 0;
         long weekCachedInput = 0, weekUncachedInput = 0;
         var weeklyModelStats = new Dictionary<string, ModelStats>();
+        bool anyEstimated = false;
 
         foreach (var entry in FileCache.Values)
         {
+            var resolved = ResolveRate(entry.Model);
+            if (resolved.Estimated) anyEstimated = true;
+
             foreach (var r in entry.Records)
             {
                 if (r.TimestampUtc < monthAgo) continue;
 
-                // totalTokens = input + output (reasoning is a subset of output, not added).
-                long totalTokens = r.Input + r.Output;
+                // Headline token count excludes cached input (near-free prompt-cache reuse
+                // at 50% of input). This matches the Claude headline definition (which
+                // excludes cache reads) so the two provider panels compare honestly —
+                // Bug 3 in the fix brief.
+                long uncachedInput = Math.Max(0, r.Input - r.CachedInput);
+                long totalTokens = uncachedInput + r.Output;
+
+                decimal cost = CalculateCost(resolved.Rate, r.Input, r.CachedInput, r.Output);
 
                 // Monthly aggregation
                 monthTokens += totalTokens;
-                monthCost += r.Cost;
+                monthCost += cost;
 
                 if (r.TimestampUtc >= weekAgo)
                 {
                     weekTokens += totalTokens;
-                    weekCost += r.Cost;
+                    weekCost += cost;
                     weekCachedInput += r.CachedInput;
-                    weekUncachedInput += r.Input;
+                    weekUncachedInput += uncachedInput;
 
                     if (!weeklyModelStats.TryGetValue(entry.Model, out var stats))
                     {
-                        stats = new ModelStats();
+                        stats = new ModelStats { IsEstimated = resolved.Estimated };
                         weeklyModelStats[entry.Model] = stats;
                     }
                     stats.Input += r.Input;
                     stats.Output += r.Output;
                     stats.CachedInput += r.CachedInput;
                     stats.Reasoning += r.Reasoning;
-                    stats.Cost += r.Cost;
+                    stats.Cost += cost;
                 }
 
                 // Today (local-midnight boundary)
                 if (TimeZoneInfo.ConvertTimeFromUtc(r.TimestampUtc, TimeZoneInfo.Local).Date == todayLocal)
                 {
                     todayTokens += totalTokens;
-                    todayCost += r.Cost;
+                    todayCost += cost;
                 }
 
                 // 5h
                 if (r.TimestampUtc >= fiveHoursAgo)
                 {
                     fiveHTokens += totalTokens;
-                    fiveHCost += r.Cost;
+                    fiveHCost += cost;
                 }
             }
         }
@@ -150,8 +167,8 @@ public sealed class CodexCostCalculator
             kvp.Value.Output,
             kvp.Value.CachedInput,
             kvp.Value.Reasoning,
-            kvp.Value.Cost
-        )).OrderByDescending(m => m.TotalCostUsd).ToList();
+            kvp.Value.Cost,
+            kvp.Value.IsEstimated)).OrderByDescending(m => m.TotalCostUsd).ToList();
 
         return new CodexCostDetailsData(
             todayCost, todayTokens,
@@ -162,6 +179,7 @@ public sealed class CodexCostCalculator
         {
             WeekCachedInputTokens = weekCachedInput,
             WeekUncachedInputTokens = weekUncachedInput,
+            HasEstimatedRates = anyEstimated,
         };
     }
 
@@ -252,9 +270,7 @@ public sealed class CodexCostCalculator
                 long cachedInput = usage.TryGetProperty("cached_input_tokens", out var ct) && ct.TryGetInt64(out var cv) ? cv : 0;
                 long reasoning = usage.TryGetProperty("reasoning_output_tokens", out var rt) && rt.TryGetInt64(out var rv) ? rv : 0;
 
-                decimal cost = CalculateCost(sessionModel, input, cachedInput, output);
-
-                records.Add(new FileEntry(timestamp, input, output, cachedInput, reasoning, cost));
+                records.Add(new FileEntry(timestamp, input, output, cachedInput, reasoning));
             }
         }
         catch
@@ -265,58 +281,75 @@ public sealed class CodexCostCalculator
         return (sessionModel, records);
     }
 
+    // --- Pricing ----------------------------------------------------------------
+
     /// <summary>
-    /// Estimated per-token cost based on best-known OpenAI API rates (per 1M tokens).
-    /// Cached input is billed at 50% of input (OpenAI's standard prompt-cache discount).
-    /// Reasoning output is folded into the output rate. Rates are estimates pending
-    /// verification (web tools down until 2026-08-01); refinement is a follow-up.
+    /// OpenAI published-rate source. <b>None of the rates below were verified</b> as of
+    /// 27/07/2026; they are flagged <see cref="ModelRate.IsVerified"/>=false and the UI
+    /// marks them as estimates. Verification is a follow-up.
     /// </summary>
-    private static decimal CalculateCost(string model, long input, long cachedInput, long output)
+    private const string PricingSource = "https://platform.openai.com/docs/pricing";
+
+    /// <summary>Rates last reviewed (not verified) 27/07/2026.</summary>
+    private const string LastReviewed = "2026-07-27";
+
+    /// <summary>Per 1M token rates. Cached input is billed at 50% of input (OpenAI's standard prompt-cache discount).</summary>
+    private readonly record struct ModelRate(decimal Input, decimal Output, bool IsVerified);
+
+    /// <summary>
+    /// Estimated per-token rates by model tier. These are best-known values pending
+    /// verification — all are flagged <see cref="ModelRate.IsVerified"/>=false per Bug 4.
+    /// Substring match order: most-specific (newest frontier) first.
+    /// </summary>
+    private static readonly (string Match, ModelRate Rate)[] RateTable =
+        new (string Match, ModelRate Rate)[]
+        {
+            // Frontier (gpt-5.6-sol/terra/luna, gpt-5.5) — UNVERIFIED.
+            ("5.6",           new ModelRate(5.00m, 15.00m, false)),
+            ("5.5",           new ModelRate(5.00m, 15.00m, false)),
+            ("5.3",           new ModelRate(3.00m, 10.00m, false)),
+            ("5.2",           new ModelRate(3.00m, 10.00m, false)),
+            ("5.1",           new ModelRate(2.50m, 10.00m, false)),
+            ("gpt-5-codex",   new ModelRate(2.50m, 10.00m, false)),
+            ("mini",          new ModelRate(1.50m, 6.00m,  false)),
+        };
+
+    private static readonly ModelRate DefaultRate = new(2.50m, 10.00m, false);
+
+    private static (ModelRate Rate, bool Estimated) ResolveRate(string model)
     {
-        // Per 1M token rates. Default tier covers gpt-5-codex / gpt-5.1.
-        decimal inPrice = 2.50m;
-        decimal outPrice = 10.00m;
+        foreach (var (match, rate) in RateTable)
+        {
+            if (model.Contains(match, StringComparison.Ordinal))
+                return (rate, Estimated: !rate.IsVerified);
+        }
+        return (DefaultRate, Estimated: true);
+    }
 
-        if (model.Contains("5.6", StringComparison.Ordinal) ||
-            model.Contains("5.5", StringComparison.Ordinal))
-        {
-            // Frontier (gpt-5.6-sol/terra/luna, gpt-5.5).
-            inPrice = 5.00m; outPrice = 15.00m;
-        }
-        else if (model.Contains("5.2", StringComparison.Ordinal) ||
-                 model.Contains("5.3", StringComparison.Ordinal))
-        {
-            inPrice = 3.00m; outPrice = 10.00m;
-        }
-        else if (model.Contains("5.1", StringComparison.Ordinal) ||
-                 model.Contains("gpt-5-codex", StringComparison.Ordinal))
-        {
-            inPrice = 2.50m; outPrice = 10.00m;
-        }
-        else if (model.Contains("mini", StringComparison.Ordinal))
-        {
-            inPrice = 1.50m; outPrice = 6.00m;
-        }
-
+    /// <summary>
+    /// Estimated per-token cost from the resolved rate. Reasoning output is folded into
+    /// the output rate. All Codex rates are currently estimates.
+    /// </summary>
+    private static decimal CalculateCost(in ModelRate rate, long input, long cachedInput, long output)
+    {
         // Cached input at 50% of the input rate; remainder at full input rate.
-        decimal cachedPrice = inPrice * 0.5m;
+        decimal cachedPrice = rate.Input * 0.5m;
         long uncachedInput = Math.Max(0, input - cachedInput);
 
-        decimal inputCost = (uncachedInput / 1_000_000m) * inPrice
+        decimal inputCost = (uncachedInput / 1_000_000m) * rate.Input
                           + (cachedInput / 1_000_000m) * cachedPrice;
-        decimal outputCost = (output / 1_000_000m) * outPrice;
+        decimal outputCost = (output / 1_000_000m) * rate.Output;
 
         return inputCost + outputCost;
     }
 
-    /// <summary>One per-response usage record, cached.</summary>
+    /// <summary>One per-response usage record, cached. Raw tokens only — cost is derived at fold.</summary>
     private sealed record FileEntry(
         DateTime TimestampUtc,
         long Input,
         long Output,
         long CachedInput,
-        long Reasoning,
-        decimal Cost);
+        long Reasoning);
 
     /// <summary>Cache value: the file's mtime when parsed, its resolved model, and records.</summary>
     private sealed class FileCacheEntry
@@ -339,5 +372,7 @@ public sealed class CodexCostCalculator
         public long CachedInput;
         public long Reasoning;
         public decimal Cost;
+        /// <summary>True when the model's rate is an estimate (unknown or unverified).</summary>
+        public bool IsEstimated;
     }
 }

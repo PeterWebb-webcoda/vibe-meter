@@ -170,7 +170,10 @@ public sealed partial class ProviderViewModel : ObservableObject
         TodayCostText = $"${todayCost:F2} today";
         WeekCostText = $"${weekCost:F2} this week";
         MonthCostText = $"${monthCost:F2} this month";
-        TodayTokensText = FormatTokens(todayTokens) + " tokens";
+        // Card headline uses the same "billed tokens" definition as the cost-details
+        // window: it excludes near-free cache reuse (Claude cache reads, Codex cached
+        // input), so it tracks spend and is comparable across providers (Bug 3).
+        TodayTokensText = FormatTokens(todayTokens) + " billed tokens";
 
         CostModelBreakdowns.Clear();
         decimal totalWeekCost = weekCost > 0 ? weekCost : 1;
