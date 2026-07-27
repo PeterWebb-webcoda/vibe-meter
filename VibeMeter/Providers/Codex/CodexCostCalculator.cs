@@ -288,56 +288,84 @@ public sealed class CodexCostCalculator
     /// 27/07/2026; they are flagged <see cref="ModelRate.IsVerified"/>=false and the UI
     /// marks them as estimates. Verification is a follow-up.
     /// </summary>
-    private const string PricingSource = "https://platform.openai.com/docs/pricing";
+    private const string PricingSource = "https://developers.openai.com/api/docs/pricing";
 
-    /// <summary>Rates last reviewed (not verified) 27/07/2026.</summary>
-    private const string LastReviewed = "2026-07-27";
-
-    /// <summary>Per 1M token rates. Cached input is billed at 50% of input (OpenAI's standard prompt-cache discount).</summary>
-    private readonly record struct ModelRate(decimal Input, decimal Output, bool IsVerified);
+    /// <summary>Rates last verified against <see cref="PricingSource"/> on this date.</summary>
+    private const string LastVerified = "2026-07-27";
 
     /// <summary>
-    /// Estimated per-token rates by model tier. These are best-known values pending
-    /// verification — all are flagged <see cref="ModelRate.IsVerified"/>=false per Bug 4.
-    /// Substring match order: most-specific (newest frontier) first.
+    /// Per 1M token rates. <c>CachedInput</c> is carried explicitly rather than derived:
+    /// OpenAI's prompt-cache discount is 90% (cached input is 0.1x input), not the 50% this
+    /// calculator previously assumed.
     /// </summary>
-    private static readonly (string Match, ModelRate Rate)[] RateTable =
-        new (string Match, ModelRate Rate)[]
+    private readonly record struct ModelRate(
+        decimal Input, decimal CachedInput, decimal Output, bool IsVerified);
+
+    /// <summary>
+    /// Per-model rates keyed on explicit model ids, longest-id-first.
+    /// </summary>
+    /// <remarks>
+    /// <para>Matching on <c>"5.6"</c> was actively wrong: the three 5.6 variants differ by up
+    /// to 5x on input (sol 5.00, terra 2.50, luna 1.00), so one substring priced every Luna
+    /// turn as though it were Sol.</para>
+    /// <para>The 5.1/5.2/5.3/codex entries are legacy — no longer on OpenAI's rate card, and
+    /// unused by any session in the last 30 days. Kept unverified so old transcripts still
+    /// produce a number, flagged as an estimate in the UI.</para>
+    /// </remarks>
+    private static readonly (string Id, ModelRate Rate)[] RateTable =
+        new (string Id, ModelRate Rate)[]
         {
-            // Frontier (gpt-5.6-sol/terra/luna, gpt-5.5) — UNVERIFIED.
-            ("5.6",           new ModelRate(5.00m, 15.00m, false)),
-            ("5.5",           new ModelRate(5.00m, 15.00m, false)),
-            ("5.3",           new ModelRate(3.00m, 10.00m, false)),
-            ("5.2",           new ModelRate(3.00m, 10.00m, false)),
-            ("5.1",           new ModelRate(2.50m, 10.00m, false)),
-            ("gpt-5-codex",   new ModelRate(2.50m, 10.00m, false)),
-            ("mini",          new ModelRate(1.50m, 6.00m,  false)),
+            // Verified 2026-07-27 against PricingSource.
+            ("gpt-5.6-sol",   new ModelRate(5.00m,  0.50m,   30.00m, true)),
+            ("gpt-5.6-terra", new ModelRate(2.50m,  0.25m,   15.00m, true)),
+            ("gpt-5.6-luna",  new ModelRate(1.00m,  0.10m,    6.00m, true)),
+            ("gpt-5.5-pro",   new ModelRate(30.00m, 3.00m,  180.00m, true)),
+            ("gpt-5.5",       new ModelRate(5.00m,  0.50m,   30.00m, true)),
+            ("gpt-5.4-nano",  new ModelRate(0.20m,  0.02m,    1.25m, true)),
+            ("gpt-5.4-mini",  new ModelRate(0.75m,  0.075m,   4.50m, true)),
+            ("gpt-5.4-pro",   new ModelRate(30.00m, 3.00m,  180.00m, true)),
+            ("gpt-5.4",       new ModelRate(2.50m,  0.25m,   15.00m, true)),
+
+            // Legacy — not on the current rate card; unverified.
+            ("gpt-5.3",       new ModelRate(3.00m,  0.30m,   10.00m, false)),
+            ("gpt-5.2",       new ModelRate(3.00m,  0.30m,   10.00m, false)),
+            ("gpt-5.1",       new ModelRate(2.50m,  0.25m,   10.00m, false)),
+            ("gpt-5-codex",   new ModelRate(2.50m,  0.25m,   10.00m, false)),
         };
 
-    private static readonly ModelRate DefaultRate = new(2.50m, 10.00m, false);
+    /// <summary>Unknown model — priced at the mid tier and always surfaced as an estimate.</summary>
+    private static readonly ModelRate DefaultRate = new(2.50m, 0.25m, 15.00m, false);
 
     private static (ModelRate Rate, bool Estimated) ResolveRate(string model)
     {
-        foreach (var (match, rate) in RateTable)
+        foreach (var (id, rate) in RateTable) // longest-id-first
         {
-            if (model.Contains(match, StringComparison.Ordinal))
+            if (model.Contains(id, StringComparison.OrdinalIgnoreCase))
                 return (rate, Estimated: !rate.IsVerified);
         }
         return (DefaultRate, Estimated: true);
     }
 
-    /// <summary>
-    /// Estimated per-token cost from the resolved rate. Reasoning output is folded into
-    /// the output rate. All Codex rates are currently estimates.
-    /// </summary>
+    /// <summary>Per-record cost in USD from the resolved rate and raw token counts.</summary>
+    /// <remarks>
+    /// <para>OpenAI's <c>input_tokens</c> is inclusive of <c>cached_input_tokens</c>, so the
+    /// uncached remainder is the difference. This is the opposite of Anthropic, whose
+    /// <c>input_tokens</c> already excludes cache reads — see <c>ClaudeCostCalculator</c>.</para>
+    /// <para><c>reasoning_output_tokens</c> is deliberately not added: OpenAI counts reasoning
+    /// inside <c>output_tokens</c>, so adding it would double-charge.</para>
+    /// <para>Two published rules are not modelled. Cache writes bill at 1.25x input, but
+    /// <c>cache_write_input_tokens</c> is zero on every turn on this machine (24,472
+    /// observations), so there is nothing to charge. Prompts over 272K input tokens bill at 2x
+    /// input / 1.5x output for the whole request — 1.27% of turns here, largest seen 327K — but
+    /// how cached tokens are treated under that tier isn't documented clearly enough to
+    /// implement without guessing, so it is left out and recorded here instead.</para>
+    /// </remarks>
     private static decimal CalculateCost(in ModelRate rate, long input, long cachedInput, long output)
     {
-        // Cached input at 50% of the input rate; remainder at full input rate.
-        decimal cachedPrice = rate.Input * 0.5m;
         long uncachedInput = Math.Max(0, input - cachedInput);
 
         decimal inputCost = (uncachedInput / 1_000_000m) * rate.Input
-                          + (cachedInput / 1_000_000m) * cachedPrice;
+                          + (cachedInput / 1_000_000m) * rate.CachedInput;
         decimal outputCost = (output / 1_000_000m) * rate.Output;
 
         return inputCost + outputCost;

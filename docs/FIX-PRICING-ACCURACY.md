@@ -122,6 +122,26 @@ Two rate sets in the code are guesses and one admits it in a comment:
 Verify each against the provider's own pricing page, record the `LastVerified` date, and mark any
 that stay unverified in the UI rather than presenting them at the same confidence as known rates.
 
+> **Resolved 27/07/2026.** All three verified against
+> [OpenAI's rate card](https://developers.openai.com/api/docs/pricing) and Anthropic's model docs.
+> Fable was wrong, not merely unverified ($10/$50, not Sonnet-priced). The Codex rates were wrong
+> in two compounding ways, both worse than the brief assumed:
+>
+> - **`"5.6"` was matched as a substring**, collapsing three variants whose input rates differ by
+>   5x (sol $5.00, terra $2.50, luna $1.00). Every Luna turn was priced as a Sol turn.
+> - **Cached input was charged at 50% of input; OpenAI's discount is 90%** (cached input is 0.1x).
+>   Cached tokens are ~98.5% of Codex input volume here, so this was the dominant error.
+>
+> Output rates were also understated 2x on sol and 5.5 ($30, not $15). Net on a fixed corpus, the
+> Codex weekly figure moves **$4,625.79 → $1,031.14** (sol $2,021 → $620, terra $1,675 → $226,
+> luna $476 → $30, 5.5 $454 → $155).
+>
+> Two published OpenAI rules are deliberately not modelled, and are recorded at `CalculateCost`:
+> cache writes (1.25x input — but `cache_write_input_tokens` is zero across all 24,472 turns on
+> this machine) and the >272K-token premium tier (2x input / 1.5x output, affecting 1.27% of
+> turns; how cached tokens are treated under it isn't documented clearly enough to implement
+> without guessing).
+
 ---
 
 ## Bug 5 (minor): cache write has only one tier
