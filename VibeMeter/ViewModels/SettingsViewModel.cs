@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
+using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using VibeMeter.Models;
@@ -65,6 +66,21 @@ public partial class SettingsViewModel : ObservableObject
 
         UpdateLastUpdatedText();
     }
+
+    /// <summary>The configured Google accounts, for the Settings UI list.</summary>
+    public System.Collections.Generic.IReadOnlyList<VibeMeter.Providers.Google.GoogleAccount> GetGoogleAccounts()
+        => _mainViewModel.GetGoogleAccounts();
+
+    /// <summary>Runs the interactive Google OAuth flow; returns (email, error).</summary>
+    public async Task<(string Email, string? Error)> AddGoogleAccountAsync()
+    {
+        var (email, error) = await _mainViewModel.AddGoogleAccountAsync();
+        return (email, error);
+    }
+
+    /// <summary>Removes a Google account by email.</summary>
+    public void RemoveGoogleAccount(string email)
+        => _mainViewModel.RemoveGoogleAccount(email);
 
     [RelayCommand]
     public void Save()

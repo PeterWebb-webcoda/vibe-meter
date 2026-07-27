@@ -161,6 +161,11 @@
 
             <DockPanel Margin="16">
 
+                <!-- Footer (version) — docked bottom so it sits under the provider list -->
+                <TextBlock DockPanel.Dock="Bottom" Text="{Binding VersionText}"
+                           FontSize="9" Foreground="{StaticResource SecondaryText}"
+                           HorizontalAlignment="Center" Margin="0,8,0,0" Opacity="0.6"/>
+
                 <!-- Header -->
                 <DockPanel DockPanel.Dock="Top" Margin="0,0,0,12">
                     <StackPanel DockPanel.Dock="Left" VerticalAlignment="Center">
@@ -274,6 +279,52 @@
                                                     </StackPanel>
                                                 </Border>
 
+                                                <!-- Account carousel (Google multi-account): ‹ 1/2 › -->
+                                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,0,0"
+                                                            Visibility="{Binding ShowAccountSwitcher, Converter={StaticResource BoolToVis}}">
+                                                    <StackPanel.Resources>
+                                                        <Style x:Key="CarouselArrow" TargetType="Button">
+                                                            <Setter Property="Background" Value="Transparent"/>
+                                                            <Setter Property="BorderBrush" Value="#38FFFFFF"/>
+                                                            <Setter Property="BorderThickness" Value="1"/>
+                                                            <Setter Property="Foreground" Value="{StaticResource PrimaryText}"/>
+                                                            <Setter Property="Padding" Value="7,1"/>
+                                                            <Setter Property="Cursor" Value="Hand"/>
+                                                            <Setter Property="Template">
+                                                                <Setter.Value>
+                                                                    <ControlTemplate TargetType="Button">
+                                                                        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                                                                BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="9">
+                                                                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" Margin="{TemplateBinding Padding}"/>
+                                                                        </Border>
+                                                                        <ControlTemplate.Triggers>
+                                                                            <Trigger Property="IsMouseOver" Value="True">
+                                                                                <Setter Property="Background" Value="#30FFFFFF"/>
+                                                                            </Trigger>
+                                                                        </ControlTemplate.Triggers>
+                                                                    </ControlTemplate>
+                                                                </Setter.Value>
+                                                            </Setter>
+                                                        </Style>
+                                                    </StackPanel.Resources>
+
+                                                    <Button Style="{StaticResource CarouselArrow}"
+                                                            Click="PrevAccountButton_Click"
+                                                            ToolTip="Previous Google account">
+                                                        <TextBlock Text="‹" FontSize="12" FontWeight="SemiBold"/>
+                                                    </Button>
+
+                                                    <TextBlock Text="{Binding AccountPositionText}" FontSize="10" Margin="6,0"
+                                                               VerticalAlignment="Center"
+                                                               Foreground="{StaticResource SecondaryText}"/>
+
+                                                    <Button Style="{StaticResource CarouselArrow}"
+                                                            Click="NextAccountButton_Click"
+                                                            ToolTip="Next Google account">
+                                                        <TextBlock Text="›" FontSize="12" FontWeight="SemiBold"/>
+                                                    </Button>
+                                                </StackPanel>
+
                                                 <!-- Details button -->
                                                 <ToggleButton Background="Transparent" BorderBrush="#38FFFFFF" BorderThickness="1"
                                                         Foreground="{StaticResource PrimaryText}" Padding="8,2" Margin="8,0,0,0"
@@ -374,6 +425,18 @@
                                                 </Style>
                                             </TextBlock.Style>
                                         </TextBlock>
+
+                                        <!-- Neutral notice: fetch succeeded but there is no usage figure to show -->
+                                        <Border Background="#20FFFFFF" CornerRadius="8" Padding="10" Margin="0,8,0,0"
+                                                Visibility="{Binding ShowNotice, Converter={StaticResource BoolToVis}}">
+                                            <DockPanel>
+                                                <TextBlock DockPanel.Dock="Left" Text="&#xE946;" FontFamily="Segoe MDL2 Assets"
+                                                           FontSize="13" Foreground="{StaticResource SecondaryText}"
+                                                           VerticalAlignment="Top" Margin="0,1,8,0"/>
+                                                <TextBlock Text="{Binding Notice}" FontSize="11"
+                                                           Foreground="{StaticResource SecondaryText}" TextWrapping="Wrap"/>
+                                            </DockPanel>
+                                        </Border>
 
                                         <!-- Not configured -->
                                         <Border Background="#20FFFFFF" CornerRadius="8" Padding="10" Margin="0,8,0,0"

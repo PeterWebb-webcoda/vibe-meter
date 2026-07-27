@@ -57,6 +57,15 @@ public sealed class ProviderUsage
     public string? PlanLabel { get; init; }
     public int? AvailableCount { get; init; }
     public string? ResetNote { get; init; }
+
+    /// <summary>
+    /// A neutral, informational message shown on the card — for a successful fetch that
+    /// nonetheless has no usage figure to display (e.g. a plan whose API reports no real
+    /// quota data). Distinct from <see cref="ErrorMessage"/>: nothing has gone wrong, so it
+    /// is not logged and not painted as a failure.
+    /// </summary>
+    public string? Notice { get; init; }
+
     public IReadOnlyList<ResetCredit> ResetCredits { get; init; } = Array.Empty<ResetCredit>();
     public IReadOnlyList<UsageGauge> Gauges { get; init; } = Array.Empty<UsageGauge>();
     public object? ExtensionData { get; init; }

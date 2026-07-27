@@ -168,4 +168,16 @@ public partial class MainWindow : Window
             window.ShowDialog();
         }
     }
+
+    /// <summary>
+    /// Advances the Google card to the next account in the carousel. The provider handles
+    /// the actual index bump + raise of ActiveAccountChanged, which the MainViewModel
+    /// subscribed to in order to trigger a re-fetch.
+    /// </summary>
+    private void NextAccountButton_Click(object sender, RoutedEventArgs e)
+        => _viewModel.CycleGoogleAccount();
+
+    /// <summary>Steps the Google card back to the previous account in the carousel.</summary>
+    private void PrevAccountButton_Click(object sender, RoutedEventArgs e)
+        => _viewModel.CycleGoogleAccountBack();
 }

@@ -8,6 +8,7 @@ using VibeMeter.Core;
 using VibeMeter.Models;
 using VibeMeter.Providers.Claude;
 using VibeMeter.Providers.Codex;
+using VibeMeter.Providers.Google;
 
 namespace VibeMeter.ViewModels;
 
@@ -25,6 +26,7 @@ public sealed partial class ProviderViewModel : ObservableObject
     [ObservableProperty] private string? _planLabel;
     [ObservableProperty] private int? _availableCount;
     [ObservableProperty] private string? _resetNote;
+    [ObservableProperty] private string? _notice;
     [ObservableProperty] private string? _resetCreditsTooltip;
     [ObservableProperty] private string _statusText = "";
     [ObservableProperty] private DateTime? _lastFetched;
@@ -65,7 +67,20 @@ public sealed partial class ProviderViewModel : ObservableObject
     public bool ShowNotConfigured => State == ProviderState.NotConfigured && !HasGauges;
     public bool ShowError => State == ProviderState.Error && !HasGauges;
     public bool ShowResetBank => AvailableCount.HasValue;
+
+    /// <summary>
+    /// Show the neutral notice box — a successful fetch that has no usage figure to display
+    /// (see <see cref="ProviderUsage.Notice"/>). Not an error.
+    /// </summary>
+    public bool ShowNotice => !string.IsNullOrEmpty(Notice);
     public bool ShowDetailsButton => HasCostData;
+    /// <summary>Show the account carousel controls (Google card with ≥2 accounts).</summary>
+    public bool ShowAccountSwitcher => Id == "google" && GoogleProvider.Accounts.Count >= 2;
+
+    /// <summary>Carousel position indicator, e.g. "1/2". Empty when not applicable.</summary>
+    public string AccountPositionText => ShowAccountSwitcher
+        ? $"{GoogleProvider.ActiveAccountIndex + 1}/{GoogleProvider.Accounts.Count}"
+        : "";
     public bool IsEnabled { get; set; } = true;
 
     /// <summary>Brand accent colour for this provider's card.</summary>
@@ -101,6 +116,7 @@ public sealed partial class ProviderViewModel : ObservableObject
         PlanLabel = usage.PlanLabel;
         AvailableCount = usage.AvailableCount;
         ResetNote = usage.ResetNote;
+        Notice = usage.Notice;
         ResetCreditsTooltip = BuildCreditsTooltip(usage.ResetCredits);
         LastFetched = usage.FetchedAt;
         ExtensionData = usage.ExtensionData;
@@ -113,6 +129,9 @@ public sealed partial class ProviderViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowNotConfigured));
         OnPropertyChanged(nameof(ShowError));
         OnPropertyChanged(nameof(ShowResetBank));
+        OnPropertyChanged(nameof(ShowNotice));
+        OnPropertyChanged(nameof(ShowAccountSwitcher));
+        OnPropertyChanged(nameof(AccountPositionText));
     }
 
     private void PopulateCostData(object? extensionData)

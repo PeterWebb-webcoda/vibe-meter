@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
 using System.Threading.Tasks;
@@ -7,6 +8,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using VibeMeter.Core;
 using VibeMeter.Models;
+using VibeMeter.Providers.Google;
 using VibeMeter.Services;
 
 namespace VibeMeter.ViewModels;
@@ -44,6 +46,10 @@ public partial class MainViewModel : ObservableObject
     /// <summary>When true, the window renders as a slim horizontal strip instead of the full panel.</summary>
     [ObservableProperty] private bool _compactMode;
 
+    /// <summary>App version label for the footer, e.g. "v0.3.0".</summary>
+    public string VersionText { get; } = "v" + (System.Reflection.Assembly
+        .GetEntryAssembly()?.GetName().Version?.ToString(3) ?? "0.0.0");
+
     public WidgetTint CurrentTint => WidgetTint.All[TintIndex % WidgetTint.All.Count];
     public SolidColorBrush TintPrimaryBrush => new(CurrentTint.Primary);
     public SolidColorBrush TintSecondaryBrush => new(CurrentTint.Secondary);
@@ -59,6 +65,12 @@ public partial class MainViewModel : ObservableObject
         _settingsService = settingsService;
         _settings = _settingsService.Load();
         ApplySettings(_settings);
+
+        // Seed the Google provider with VibeMeter-owned accounts from settings.
+        SyncGoogleAccountsToProvider();
+
+        // Re-fetch when the user cycles to the next Google account.
+        GoogleProvider.ActiveAccountChanged += async () => await RefreshAsync();
 
         foreach (var provider in _registry.Providers)
         {
@@ -136,6 +148,65 @@ public partial class MainViewModel : ObservableObject
         CompactMode = !CompactMode;
         _settings.CompactMode = CompactMode;
         _settingsService.Save(_settings);
+    }
+
+    /// <summary>
+    /// Advances the Google card to the next account in the carousel (see GoogleProvider).
+    /// Bound to the "›" button; no-op when fewer than 2 accounts exist.
+    /// </summary>
+    [RelayCommand]
+    public void CycleGoogleAccount() => GoogleProvider.CycleNextAccount();
+
+    /// <summary>
+    /// Steps the Google card back to the previous account in the carousel. Bound to the
+    /// "‹" button; no-op when fewer than 2 accounts exist.
+    /// </summary>
+    [RelayCommand]
+    public void CycleGoogleAccountBack() => GoogleProvider.CyclePrevAccount();
+
+    /// <summary>
+    /// Runs the interactive Google OAuth flow and, on success, persists the new account.
+    /// Called from Settings → Add Google account. Returns the added email on success,
+    /// null on failure/cancellation (the error is surfaced to the caller to display).
+    /// </summary>
+    public async Task<(string Email, string? Error)> AddGoogleAccountAsync()
+    {
+        try
+        {
+            var (email, refreshToken) = await GoogleOAuthFlow.RunAsync();
+            // De-dupe by email: if the account already exists, replace its token.
+            _settings.GoogleAccounts.RemoveAll(a =>
+                string.Equals(a.Email, email, StringComparison.OrdinalIgnoreCase));
+            _settings.GoogleAccounts.Add(new GoogleAccount { Email = email, RefreshToken = refreshToken });
+            _settingsService.Save(_settings);
+            SyncGoogleAccountsToProvider();
+            return (email, null);
+        }
+        catch (Exception ex)
+        {
+            return ("", ex.Message);
+        }
+    }
+
+    /// <summary>Removes a configured Google account by email and persists settings.</summary>
+    public void RemoveGoogleAccount(string email)
+    {
+        _settings.GoogleAccounts.RemoveAll(a =>
+            string.Equals(a.Email, email, StringComparison.OrdinalIgnoreCase));
+        _settingsService.Save(_settings);
+        SyncGoogleAccountsToProvider();
+    }
+
+    /// <summary>The configured Google accounts (read-only view for the Settings UI).</summary>
+    public IReadOnlyList<GoogleAccount> GetGoogleAccounts() => _settings.GoogleAccounts;
+
+    /// <summary>
+    /// Copies settings → the Google provider's configured-account list. The provider merges
+    /// these with the auto-detected Antigravity account to form the carousel roster.
+    /// </summary>
+    private void SyncGoogleAccountsToProvider()
+    {
+        GoogleProvider.ConfiguredAccounts = _settings.GoogleAccounts.ToList();
     }
 
     public void SaveSettings()

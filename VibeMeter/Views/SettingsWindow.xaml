@@ -106,6 +106,34 @@
                            VerticalAlignment="Center"/>
             </Grid>
 
+            <Border Height="1" Background="#38FFFFFF" Margin="0,12"/>
+
+            <!-- Google accounts management -->
+            <TextBlock Text="Google accounts" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,4"/>
+            <TextBlock Text="Add multiple Google AI Pro accounts to cycle through on the Google card."
+                       FontSize="11" Foreground="#B0B0C0" Margin="0,0,0,8" TextWrapping="Wrap"/>
+            <ItemsControl x:Name="GoogleAccountsList" Margin="0,0,0,8">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Grid Margin="0,0,0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Text="{Binding Email}" VerticalAlignment="Center" FontSize="12"/>
+                            <Button Grid.Column="1" Content="Remove" Padding="8,2" FontSize="10"
+                                    Click="RemoveGoogleAccount_Click" Tag="{Binding Email}"
+                                    Background="#40FFFFFF" Foreground="White" BorderThickness="0" Cursor="Hand"/>
+                        </Grid>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+            <Button x:Name="AddGoogleAccountButton" Content="+ Add Google account" Padding="10,4"
+                    Click="AddGoogleAccount_Click"
+                    Background="#40C2E8" Foreground="Black" FontWeight="SemiBold" BorderThickness="0"
+                    HorizontalAlignment="Left" Margin="0,0,0,4"/>
+            <TextBlock x:Name="GoogleAccountStatus" FontSize="11" Foreground="#B0B0C0" Margin="0,4,0,0"/>
+
         </StackPanel>
 
         <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">

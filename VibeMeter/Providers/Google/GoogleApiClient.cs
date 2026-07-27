@@ -27,6 +27,7 @@ internal static class GoogleApiClient
     private const string BaseUrl = "https://cloudcode-pa.googleapis.com";
     private const string RetrieveUserQuotaSummaryPath = "/v1internal:retrieveUserQuotaSummary";
     private const string LoadCodeAssistPath = "/v1internal:loadCodeAssist";
+    private const string FetchAvailableModelsPath = "/v1internal:fetchAvailableModels";
 
     private const string FullEligibilityMode = "FULL_ELIGIBILITY_CHECK";
 
@@ -50,6 +51,26 @@ internal static class GoogleApiClient
     {
         string body = JsonSerializer.Serialize(new { mode = FullEligibilityMode });
         return await PostAsync(LoadCodeAssistPath, accessToken, body, ct);
+    }
+
+    /// <summary>
+    /// Fetches the model catalogue with each model's <c>quotaInfo</c>. This is the endpoint
+    /// behind Antigravity's own model picker (its reset timestamps match the picker's
+    /// tooltip exactly), and unlike <see cref="RetrieveUserQuotaSummaryAsync"/> it reports
+    /// real figures on every tier — so it is the authority for accounts whose quota summary
+    /// comes back as a placeholder.
+    /// </summary>
+    /// <param name="project">
+    /// The <c>cloudaicompanionProject</c> from <see cref="LoadCodeAssistAsync"/>. Optional;
+    /// omitted from the body when null, matching the Cockpit extension's own call.
+    /// </param>
+    public static async Task<JsonDocument> FetchAvailableModelsAsync(
+        string accessToken, string? project, CancellationToken ct = default)
+    {
+        string body = project is { Length: > 0 }
+            ? JsonSerializer.Serialize(new { project })
+            : "{}";
+        return await PostAsync(FetchAvailableModelsPath, accessToken, body, ct);
     }
 
     private static async Task<JsonDocument> PostAsync(
