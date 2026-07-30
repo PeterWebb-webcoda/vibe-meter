@@ -142,6 +142,36 @@ that stay unverified in the UI rather than presenting them at the same confidenc
 > turns; how cached tokens are treated under it isn't documented clearly enough to implement
 > without guessing).
 
+> **Pricing update 31/07/2026.** OpenAI's live model catalogue reduced GPT-5.6 Terra to
+> $2.00 input / $0.20 cached / $12.00 output and GPT-5.6 Luna to $0.20 / $0.02 / $1.20.
+> Sol remains $5.00 / $0.50 / $30.00. The rate table and its verification date were updated.
+
+## Bug 7 (found 31/07/2026): the monotonic floor prevented resets and corrections
+
+Both providers applied `WithMonotonicFloor` when accepting a completed background calculation.
+That is invalid for every displayed bucket: Today must fall at local midnight, and the 5-hour,
+7-day and 30-day windows must fall as old records age out. It also prevented a lower corrected
+rate from taking effect until the app restarted. Only the aggregate values were floored, so the
+headline could disagree with the sum of the fresh per-model rows.
+
+The floor was removed. Fresh folds are now accepted as-is; the calculators already preserve
+unchanged parsed files in their per-file caches.
+
+## Bug 8 (found 31/07/2026): active Codex rollouts were excluded
+
+Codex keeps active rollout files open for writing. `File.OpenRead` requests `FileShare.Read`
+only, so every live task failed with a sharing violation and `ParseFileAsync` silently returned
+zero records. The reader now uses `FileShare.ReadWrite | FileShare.Delete`, allowing Vibe Meter
+to consume the stable prefix while Codex continues appending.
+
+## Bug 9 (found 31/07/2026): streamed Claude messages were counted repeatedly
+
+Claude transcripts can contain two or three assistant rows with the same `message.id`. Early
+rows are streaming snapshots with partial output usage; input and cache buckets are repeated,
+and the final row contains the completed output count. The calculator previously billed every
+snapshot. It now merges each message id using the latest timestamp and maximum cumulative value
+for each token/cost bucket. Rows without a message id remain independent.
+
 ---
 
 ## Bug 5 (minor): cache write has only one tier

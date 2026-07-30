@@ -33,11 +33,10 @@ namespace VibeMeter.Providers.Codex;
 /// effect on the next fold without needing to bust the cache (see the FIX-PRICING-ACCURACY
 /// brief).
 /// </para>
-/// <para><b>Costs are estimates.</b> Codex transcripts carry no per-request $ figure
-/// (unlike Claude's <c>costUSD</c>), so costs are computed from a best-known pricing
-/// table — see <see cref="ResolveRate"/>. Reasoning output is billed at the output rate.
-/// <b>No Codex/OpenAI rate has been independently verified</b> as of 27/07/2026, so every
-/// rate is flagged estimated and the UI marks it accordingly.</para>
+/// <para><b>Costs are API-equivalent estimates.</b> Codex subscription transcripts carry
+/// no per-request $ figure, so costs are computed from OpenAI's published API rates — see
+/// <see cref="ResolveRate"/>. They are not charges added to the user's subscription.
+/// Reasoning output is billed at the output rate.</para>
 /// </remarks>
 public sealed class CodexCostCalculator
 {
@@ -114,7 +113,7 @@ public sealed class CodexCostCalculator
                 if (r.TimestampUtc < monthAgo) continue;
 
                 // Headline token count excludes cached input (near-free prompt-cache reuse
-                // at 50% of input). This matches the Claude headline definition (which
+                // at 10% of input). This matches the Claude headline definition (which
                 // excludes cache reads) so the two provider panels compare honestly —
                 // Bug 3 in the fix brief.
                 long uncachedInput = Math.Max(0, r.Input - r.CachedInput);
@@ -199,7 +198,13 @@ public sealed class CodexCostCalculator
 
         try
         {
-            using var stream = File.OpenRead(path);
+            // Codex Desktop/CLI holds active rollouts open for writing without sharing
+            // delete access. File.OpenRead (FileShare.Read only) therefore rejects every
+            // live task and makes today's usage appear as zero. Read the stable prefix
+            // while allowing the writer to continue appending.
+            using var stream = new FileStream(
+                path, FileMode.Open, FileAccess.Read,
+                FileShare.ReadWrite | FileShare.Delete);
             using var reader = new StreamReader(stream);
             string? line;
             while ((line = await reader.ReadLineAsync()) != null)
@@ -284,14 +289,13 @@ public sealed class CodexCostCalculator
     // --- Pricing ----------------------------------------------------------------
 
     /// <summary>
-    /// OpenAI published-rate source. <b>None of the rates below were verified</b> as of
-    /// 27/07/2026; they are flagged <see cref="ModelRate.IsVerified"/>=false and the UI
-    /// marks them as estimates. Verification is a follow-up.
+    /// OpenAI published-rate source. Current model rates below were checked against the
+    /// live model catalogue; legacy rates remain explicitly unverified.
     /// </summary>
-    private const string PricingSource = "https://developers.openai.com/api/docs/pricing";
+    private const string PricingSource = "https://developers.openai.com/api/docs/models/compare";
 
     /// <summary>Rates last verified against <see cref="PricingSource"/> on this date.</summary>
-    private const string LastVerified = "2026-07-27";
+    private const string LastVerified = "2026-07-31";
 
     /// <summary>
     /// Per 1M token rates. <c>CachedInput</c> is carried explicitly rather than derived:
@@ -315,10 +319,13 @@ public sealed class CodexCostCalculator
     private static readonly (string Id, ModelRate Rate)[] RateTable =
         new (string Id, ModelRate Rate)[]
         {
-            // Verified 2026-07-27 against PricingSource.
+            // Verified 2026-07-31 against the live OpenAI model catalogue. OpenAI reduced
+            // Terra and Luna after the original 27/07 table was added.
             ("gpt-5.6-sol",   new ModelRate(5.00m,  0.50m,   30.00m, true)),
-            ("gpt-5.6-terra", new ModelRate(2.50m,  0.25m,   15.00m, true)),
-            ("gpt-5.6-luna",  new ModelRate(1.00m,  0.10m,    6.00m, true)),
+            ("gpt-5.6-terra", new ModelRate(2.00m,  0.20m,   12.00m, true)),
+            ("gpt-5.6-luna",  new ModelRate(0.20m,  0.02m,    1.20m, true)),
+            // The unsuffixed alias routes to Sol. Keep this after the specific ids.
+            ("gpt-5.6",       new ModelRate(5.00m,  0.50m,   30.00m, true)),
             ("gpt-5.5-pro",   new ModelRate(30.00m, 3.00m,  180.00m, true)),
             ("gpt-5.5",       new ModelRate(5.00m,  0.50m,   30.00m, true)),
             ("gpt-5.4-nano",  new ModelRate(0.20m,  0.02m,    1.25m, true)),
@@ -334,7 +341,7 @@ public sealed class CodexCostCalculator
         };
 
     /// <summary>Unknown model — priced at the mid tier and always surfaced as an estimate.</summary>
-    private static readonly ModelRate DefaultRate = new(2.50m, 0.25m, 15.00m, false);
+    private static readonly ModelRate DefaultRate = new(2.00m, 0.20m, 12.00m, false);
 
     private static (ModelRate Rate, bool Estimated) ResolveRate(string model)
     {

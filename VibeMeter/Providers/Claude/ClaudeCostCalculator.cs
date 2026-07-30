@@ -91,66 +91,67 @@ public sealed class ClaudeCostCalculator
         long weekCacheRead = 0, weekCacheWrite = 0, weekUncachedInput = 0;
         var weeklyModelStats = new Dictionary<string, ModelStats>();
 
-        foreach (var cacheEntry in FileCache.Values)
+        // Claude writes multiple assistant rows for one streamed response. They share a
+        // message id: early rows contain partial output usage and the final row contains
+        // the completed usage. Merge those rows before folding or input/cache tokens are
+        // billed two or three times for a single response.
+        foreach (var r in DeduplicateRecords(FileCache.Values.SelectMany(e => e.Records)))
         {
-            foreach (var r in cacheEntry.Records)
+            if (r.TimestampUtc < monthAgo) continue;
+
+            // Headline token count = tokens billed at a non-trivial rate, i.e. it
+            // excludes cache READS (near-free reuse at 0.1x). Cache WRITES are included
+            // — they're new context billed at 1.25x. This matches the Codex headline
+            // definition so the two provider panels compare honestly. See Bug 3.
+            long cacheWriteTotal = r.CacheWrite5m + r.CacheWrite1h;
+            long totalTokens = r.Input + r.Output + cacheWriteTotal;
+
+            if (!resolvedRates.TryGetValue(r.Model, out var resolved))
             {
-                if (r.TimestampUtc < monthAgo) continue;
+                resolved = ResolveRate(r.Model);
+                resolvedRates[r.Model] = resolved;
+            }
+            decimal cost = r.NativeCostUsd
+                ?? CalculateCost(resolved.MatchedId, resolved.Rate,
+                                 r.Input, r.Output, r.CacheWrite5m, r.CacheWrite1h, r.CacheRead,
+                                 r.TimestampUtc);
 
-                // Headline token count = tokens billed at a non-trivial rate, i.e. it
-                // excludes cache READS (near-free reuse at 0.1x). Cache WRITES are included
-                // — they're new context billed at 1.25x. This matches the Codex headline
-                // definition so the two provider panels compare honestly. See Bug 3.
-                long cacheWriteTotal = r.CacheWrite5m + r.CacheWrite1h;
-                long totalTokens = r.Input + r.Output + cacheWriteTotal;
+            // Monthly aggregation
+            monthTokens += totalTokens;
+            monthCost += cost;
 
-                if (!resolvedRates.TryGetValue(r.Model, out var resolved))
+            if (r.TimestampUtc >= weekAgo)
+            {
+                weekTokens += totalTokens;
+                weekCost += cost;
+                weekCacheRead += r.CacheRead;
+                weekCacheWrite += cacheWriteTotal;
+                weekUncachedInput += r.Input;
+
+                if (!weeklyModelStats.TryGetValue(r.Model, out var stats))
                 {
-                    resolved = ResolveRate(r.Model);
-                    resolvedRates[r.Model] = resolved;
+                    stats = new ModelStats { IsEstimated = resolved.Estimated };
+                    weeklyModelStats[r.Model] = stats;
                 }
-                decimal cost = r.NativeCostUsd
-                    ?? CalculateCost(resolved.MatchedId, resolved.Rate,
-                                     r.Input, r.Output, r.CacheWrite5m, r.CacheWrite1h, r.CacheRead,
-                                     r.TimestampUtc);
+                stats.Input += r.Input;
+                stats.Output += r.Output;
+                stats.CacheWrite += cacheWriteTotal;
+                stats.CacheRead += r.CacheRead;
+                stats.Cost += cost;
+            }
 
-                // Monthly aggregation
-                monthTokens += totalTokens;
-                monthCost += cost;
+            // Today (local-midnight boundary)
+            if (TimeZoneInfo.ConvertTimeFromUtc(r.TimestampUtc, TimeZoneInfo.Local).Date == todayLocal)
+            {
+                todayTokens += totalTokens;
+                todayCost += cost;
+            }
 
-                if (r.TimestampUtc >= weekAgo)
-                {
-                    weekTokens += totalTokens;
-                    weekCost += cost;
-                    weekCacheRead += r.CacheRead;
-                    weekCacheWrite += cacheWriteTotal;
-                    weekUncachedInput += r.Input;
-
-                    if (!weeklyModelStats.TryGetValue(r.Model, out var stats))
-                    {
-                        stats = new ModelStats { IsEstimated = resolved.Estimated };
-                        weeklyModelStats[r.Model] = stats;
-                    }
-                    stats.Input += r.Input;
-                    stats.Output += r.Output;
-                    stats.CacheWrite += cacheWriteTotal;
-                    stats.CacheRead += r.CacheRead;
-                    stats.Cost += cost;
-                }
-
-                // Today (local-midnight boundary)
-                if (TimeZoneInfo.ConvertTimeFromUtc(r.TimestampUtc, TimeZoneInfo.Local).Date == todayLocal)
-                {
-                    todayTokens += totalTokens;
-                    todayCost += cost;
-                }
-
-                // 5h
-                if (r.TimestampUtc >= fiveHoursAgo)
-                {
-                    fiveHTokens += totalTokens;
-                    fiveHCost += cost;
-                }
+            // 5h
+            if (r.TimestampUtc >= fiveHoursAgo)
+            {
+                fiveHTokens += totalTokens;
+                fiveHCost += cost;
             }
         }
 
@@ -220,6 +221,9 @@ public sealed class ClaudeCostCalculator
                 var msgEl = root.TryGetProperty("message", out var m) ? m : root;
 
                 string model = msgEl.TryGetProperty("model", out var modelEl) ? modelEl.GetString() ?? "unknown" : "unknown";
+                string? messageId = msgEl.TryGetProperty("id", out var idEl) && idEl.ValueKind == JsonValueKind.String
+                    ? idEl.GetString()
+                    : null;
 
                 long input = 0, output = 0, cacheRead = 0, cw5m = 0, cw1h = 0;
                 if (msgEl.TryGetProperty("usage", out var usageEl))
@@ -249,7 +253,7 @@ public sealed class ClaudeCostCalculator
                     ? parsedCost
                     : null;
 
-                records.Add(new FileEntry(utcTs, model, input, output, cw5m, cw1h, cacheRead, nativeCost));
+                records.Add(new FileEntry(utcTs, messageId, model, input, output, cw5m, cw1h, cacheRead, nativeCost));
             }
         }
         catch
@@ -263,6 +267,56 @@ public sealed class ClaudeCostCalculator
     private static long ReadLong(JsonElement el) =>
         el.ValueKind == JsonValueKind.Number && el.TryGetInt64(out var v) ? v : 0;
 
+    /// <summary>
+    /// Merges repeated streaming snapshots for each Claude API message. Token buckets are
+    /// cumulative within a message, so the maximum of each bucket is the completed usage.
+    /// Rows without a message id cannot be safely matched and remain independent.
+    /// </summary>
+    private static IEnumerable<FileEntry> DeduplicateRecords(IEnumerable<FileEntry> records)
+    {
+        var byMessageId = new Dictionary<string, FileEntry>(StringComparer.Ordinal);
+        var withoutMessageId = new List<FileEntry>();
+
+        foreach (var record in records)
+        {
+            if (string.IsNullOrWhiteSpace(record.MessageId))
+            {
+                withoutMessageId.Add(record);
+                continue;
+            }
+
+            if (!byMessageId.TryGetValue(record.MessageId, out var existing))
+            {
+                byMessageId[record.MessageId] = record;
+                continue;
+            }
+
+            var latest = record.TimestampUtc >= existing.TimestampUtc ? record : existing;
+            byMessageId[record.MessageId] = latest with
+            {
+                TimestampUtc = record.TimestampUtc >= existing.TimestampUtc
+                    ? record.TimestampUtc
+                    : existing.TimestampUtc,
+                Input = Math.Max(existing.Input, record.Input),
+                Output = Math.Max(existing.Output, record.Output),
+                CacheWrite5m = Math.Max(existing.CacheWrite5m, record.CacheWrite5m),
+                CacheWrite1h = Math.Max(existing.CacheWrite1h, record.CacheWrite1h),
+                CacheRead = Math.Max(existing.CacheRead, record.CacheRead),
+                NativeCostUsd = Max(existing.NativeCostUsd, record.NativeCostUsd),
+            };
+        }
+
+        return withoutMessageId.Concat(byMessageId.Values);
+    }
+
+    private static decimal? Max(decimal? left, decimal? right) => (left, right) switch
+    {
+        (null, null) => null,
+        (null, not null) => right,
+        (not null, null) => left,
+        _ => Math.Max(left!.Value, right!.Value),
+    };
+
     // --- Pricing ----------------------------------------------------------------
 
     /// <summary>
@@ -270,8 +324,8 @@ public sealed class ClaudeCostCalculator
     /// </summary>
     private const string PricingSource = "https://platform.claude.com/docs/en/about-claude/models/overview";
 
-    /// <summary>All rates verified 27/07/2026 against <see cref="PricingSource"/>.</summary>
-    private const string LastVerified = "2026-07-27";
+    /// <summary>All rates verified 31/07/2026 against <see cref="PricingSource"/>.</summary>
+    private const string LastVerified = "2026-07-31";
 
     /// <summary>
     /// Sonnet 5 introductory pricing of $2 in / $10 out applies through 2026-08-31; the
@@ -387,6 +441,7 @@ public sealed class ClaudeCostCalculator
     /// <summary>One per-record usage entry, cached. Raw tokens only — cost is derived at fold.</summary>
     private sealed record FileEntry(
         DateTime TimestampUtc,
+        string? MessageId,
         string Model,
         long Input,
         long Output,

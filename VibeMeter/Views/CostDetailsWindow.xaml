@@ -131,8 +131,8 @@
             </ScrollViewer>
 
             <TextBlock Grid.Row="4" FontSize="10" Foreground="#606070" HorizontalAlignment="Center" Margin="0,10,0,0" TextAlignment="Center">
-                Rates verified 27/07/2026 against Anthropic's published model pricing.<LineBreak/>
-                Any row marked ⓘ est. rate fell back to an estimated price (model not in table).
+                API-equivalent estimate; subscription cost may differ.<LineBreak/>
+                Rates verified 31/07/2026. Rows marked ⓘ use fallback pricing.
             </TextBlock>
         </Grid>
     </Border>

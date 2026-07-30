@@ -64,16 +64,10 @@ public sealed class CodexProvider : IUsageProvider
         {
             if (_costTask?.IsCompletedSuccessfully == true && _costTask.Result is { } fresh)
             {
-                // High-water-mark guard: token spend is monotonic within a window, so a
-                // fresh result lower than the cached one is a measurement artifact (the
-                // calc raced with Codex appending to a live session file and read a
-                // partial line). Keep the higher totals rather than letting the UI tick
-                // backwards. The guard is per-field so a reset on a longer window (e.g.
-                // the 5h bucket aging out) can still take effect without the today/week
-                // values flickering.
-                _lastCostData = _lastCostData is { } prev
-                    ? fresh.WithMonotonicFloor(prev)
-                    : fresh;
+                // Every displayed window is time-bounded. Accept decreases so the Today
+                // bucket can reset at local midnight, rolling windows can age out, and a
+                // corrected rate table takes effect without requiring an app restart.
+                _lastCostData = fresh;
             }
             _costTask = Task.Run(CodexCostCalculator.CalculateCostsAsync);
         }
