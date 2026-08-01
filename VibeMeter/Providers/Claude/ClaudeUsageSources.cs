@@ -236,21 +236,29 @@ internal static class ClaudeUsageSources
     }
 
     /// <summary>
-    /// Infers when the current rolling window closes by finding where the series last fell.
-    /// That fall is the window rolling over, so the window opened then and closes one window
-    /// length later.
+    /// Infers when the current window closes, by finding a past rollover and projecting the
+    /// cadence forward.
     /// </summary>
     /// <remarks>
-    /// Deliberately conservative. It returns null — leaving the UI to say "current window" —
-    /// rather than guessing whenever:
-    /// <list type="bullet">
-    /// <item><description>the window is idle (0% used), so no window is actually open;</description></item>
-    /// <item><description>no reset is visible in the retained history;</description></item>
-    /// <item><description>the projected reset has already passed, which means the desktop app
-    /// was closed across a rollover and the history has a hole in it.</description></item>
-    /// </list>
-    /// The result is only ever as precise as the sampling interval (~5 minutes), and lands
-    /// slightly late, because we can only see a reset at the first sample taken after it.
+    /// <para>
+    /// A rollover shows up as the series falling — e.g. <c>fh</c> 99 → 0. Sampling only tells
+    /// us it happened somewhere between two samples, but window boundaries land on the hour,
+    /// so when exactly one hour mark falls inside that bracket we can recover the boundary
+    /// exactly rather than to sampling precision. From there the cadence repeats every window
+    /// length, so we step forward to the first boundary still ahead of us.
+    /// </para>
+    /// <para>
+    /// Anchors that snapped to an hour are preferred over ones that did not, even if older:
+    /// an exact anchor projected across several windows beats an imprecise recent one, since
+    /// the cadence itself does not drift.
+    /// </para>
+    /// <para>
+    /// It returns null — leaving the UI to say "current window" — rather than guess when no
+    /// rollover survives in the retained history, when the only anchor is too old to trust,
+    /// or when the projection contradicts the observed usage. A zero-utilisation reading is
+    /// still eligible when it follows a recent rollover: that is the normal idle state during
+    /// the newly opened window, and is exactly when the UI still needs to show its reset time.
+    /// </para>
     /// </remarks>
     private static DateTime? DeriveReset(
         IReadOnlyList<ClaudePlanUsageSample> ordered,
@@ -259,7 +267,45 @@ internal static class ClaudeUsageSources
         DateTime now)
     {
         var current = ordered.Count > 0 && ordered[^1].Usage is { } u ? selector(u) : null;
-        if (current is null or <= 0) return null;
+        if (current is null) return null;
+
+        // Active windows benefit from the exact-hour anchor preference below. For an idle
+        // window, however, the newest observed rollover is the only useful evidence; an older
+        // exact anchor can otherwise win and make a valid fresh reset look stale.
+        var anchor = current.Value > 0
+            ? FindAnchor(ordered, selector)
+            : FindMostRecentAnchor(ordered, selector);
+        if (anchor is null) return null;
+
+        // Once an idle window's last observed rollover is more than one window old, the
+        // history cannot tell whether that window is still open or simply unused. Do not
+        // invent a countdown in that case.
+        if (current.Value <= 0 && now - anchor.Value > window) return null;
+
+        // An anchor only stays useful while the cadence it pins is still recognisable. Well
+        // beyond a handful of windows, any small error compounds and the history is likely to
+        // have holes anyway.
+        if (now - anchor.Value > MaxAnchorAge(window)) return null;
+
+        var reset = anchor.Value;
+        while (reset <= now) reset += window;
+
+        // Sanity-check the projection against reality: the window it implies cannot have
+        // started after usage we already observed inside it. If it did, the cadence is not
+        // what we think it is, and no countdown beats a wrong one.
+        var windowStart = reset - window;
+        return windowStart <= FirstUsageInCurrentRun(ordered, selector) ? reset : null;
+    }
+
+    /// <summary>
+    /// Locates the most recent rollover to project from, preferring one whose bracketing
+    /// samples pin it to an exact hour.
+    /// </summary>
+    private static DateTime? FindAnchor(
+        IReadOnlyList<ClaudePlanUsageSample> ordered,
+        Func<ClaudePlanUsageValues, int?> selector)
+    {
+        DateTime? approximate = null;
 
         for (var i = ordered.Count - 1; i > 0; i--)
         {
@@ -270,12 +316,79 @@ internal static class ClaudeUsageSources
             if (after is null || before is null) continue;
             if (before.Value - after.Value < ResetDropThreshold) continue;
 
-            var reset = ordered[i].ObservedAt + window;
-            return reset > now ? reset : null;
+            var from = ordered[i - 1].ObservedAt;
+            var to = ordered[i].ObservedAt;
+
+            if (SoleHourMarkBetween(from, to) is { } exact) return exact;
+
+            // Keep the newest imprecise rollover as a fallback, but keep looking further back
+            // for an exact one.
+            approximate ??= to;
+        }
+
+        return approximate;
+    }
+
+    /// <summary>
+    /// Locates the newest rollover, snapping it to an hour when the surrounding samples make
+    /// that boundary unambiguous. Unlike <see cref="FindAnchor"/>, this deliberately does not
+    /// prefer an older exact anchor: it is used only for a zero-utilisation window, where
+    /// recency is more informative than cadence precision.
+    /// </summary>
+    private static DateTime? FindMostRecentAnchor(
+        IReadOnlyList<ClaudePlanUsageSample> ordered,
+        Func<ClaudePlanUsageValues, int?> selector)
+    {
+        for (var i = ordered.Count - 1; i > 0; i--)
+        {
+            if (ordered[i].Usage is not { } value || ordered[i - 1].Usage is not { } previous) continue;
+
+            var after = selector(value);
+            var before = selector(previous);
+            if (after is null || before is null) continue;
+            if (before.Value - after.Value < ResetDropThreshold) continue;
+
+            var from = ordered[i - 1].ObservedAt;
+            var to = ordered[i].ObservedAt;
+            return SoleHourMarkBetween(from, to) ?? to;
         }
 
         return null;
     }
+
+    /// <summary>
+    /// Returns the single hour mark inside <c>(from, to]</c>, or null when the bracket spans
+    /// none — or more than one, which would make the choice a guess.
+    /// </summary>
+    private static DateTime? SoleHourMarkBetween(DateTime from, DateTime to)
+    {
+        var mark = new DateTime(from.Year, from.Month, from.Day, from.Hour, 0, 0, from.Kind).AddHours(1);
+
+        DateTime? only = null;
+        for (; mark <= to; mark = mark.AddHours(1))
+        {
+            if (only is not null) return null;
+            only = mark;
+        }
+
+        return only;
+    }
+
+    /// <summary>
+    /// When the current unbroken run of non-zero readings began — the earliest moment we know
+    /// the open window was already running.
+    /// </summary>
+    private static DateTime FirstUsageInCurrentRun(
+        IReadOnlyList<ClaudePlanUsageSample> ordered,
+        Func<ClaudePlanUsageValues, int?> selector)
+    {
+        var i = ordered.Count - 1;
+        while (i > 0 && ordered[i - 1].Usage is { } previous && selector(previous) > 0) i--;
+        return ordered[i].ObservedAt;
+    }
+
+    /// <summary>How stale an anchor may be before we stop projecting from it.</summary>
+    private static TimeSpan MaxAnchorAge(TimeSpan window) => window * 6;
 
     private static int? Clamp(int? percent) =>
         percent.HasValue ? Math.Max(0, Math.Min(100, percent.Value)) : null;
