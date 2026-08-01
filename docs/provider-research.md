@@ -6,7 +6,7 @@ monitors. Conducted 29/06/2026. Status reflects the codebase at the time of writ
 | Provider | Outcome | Source used |
 |----------|---------|-------------|
 | Codex (OpenAI) | ✅ Live gauges | `~/.codex/auth.json` → ChatGPT `wham/usage` API |
-| Claude Code | ✅ Live gauges | `~/.claude/usage_cache.json` (local cache) |
+| Claude | ✅ Live gauges | `~/.claude/usage_cache.json`, else `%APPDATA%\Claude\plan-usage-history.json` |
 | Z.ai GLM | ✅ Live gauges | `api.z.ai/api/monitor/usage/quota/limit` (via `ZAI_API_KEY`) |
 | Google AI Pro / Antigravity | ✅ Live gauges | `cloudcode-pa.googleapis.com` Cloud Code backend (via `~/.gemini/oauth_creds.json`) |
 
@@ -24,14 +24,31 @@ No changes were made. Reference implementation for the `IUsageProvider` contract
 
 ---
 
-## Claude Code — ✅ implemented (live gauges)
+## Claude — ✅ implemented (live gauges)
 
 ### Finding
-Claude Code does **not** expose a documented public usage REST API for subscription
-plans. Instead, the CLI persists a usage snapshot locally that mirrors exactly what its
+Claude does **not** expose a documented public usage REST API for subscription plans.
+Instead, each Claude surface persists a usage snapshot locally, mirroring what the CLI's
 own `/usage` command displays.
 
-### Source
+Crucially, **which file exists depends on how the user runs Claude**, so the provider
+must not assume the CLI cache. Two surfaces write usage, and a PC may have either, both,
+or neither:
+
+| Surface | File | Fidelity |
+|---------|------|----------|
+| Claude Code CLI | `usage_cache.json` under the config dir | Exact percentages, exact reset timestamps, model-scoped weekly limits |
+| Claude desktop app | `%APPDATA%\Claude\plan-usage-history.json` | Percentages only; resets inferred, no scoped limits |
+
+Path discovery and source selection live in `ClaudeUsageSources`. It reads every
+available source, takes whichever observed the account most recently, and backfills any
+reset time the winner lacks from the other — but only when that time is still in the
+future. Percentages are never blended across sources.
+
+`CLAUDE_CONFIG_DIR` is honoured for both `usage_cache.json` and `.claude.json`, since it
+relocates the whole `~/.claude` tree.
+
+### Source 1 — the CLI cache
 `%USERPROFILE%\.claude\usage_cache.json`, written and refreshed by the Claude Code CLI
 while it runs. Relevant shape:
 
@@ -68,17 +85,65 @@ Plan / identity metadata comes from the `oauthAccount` block in
 }
 ```
 
+### Source 2 — the desktop app's sampled history
+`%APPDATA%\Claude\plan-usage-history.json`, appended by the Claude desktop app roughly
+every 5 minutes while it runs. On a PC where Claude Code is only ever used *through* the
+desktop app, this is the **only** usage file that exists — no `usage_cache.json` is
+written at all, which is why an implementation that assumed the CLI cache showed nothing
+on such machines.
+
+```jsonc
+{
+  "version": 2,
+  "samples": [
+    { "t": 1785552896497, "org": "<uuid>", "u": { "fh": 0, "sd": 10 } }
+  ]
+}
+```
+
+`t` is epoch ms, `fh` is 5-hour used-%, `sd` is 7-day used-%. There are no reset
+timestamps and no scoped limits.
+
+**Deriving resets.** A window rollover shows up as the series falling — e.g. `fh`
+99 → 0. The window therefore opened at that sample and closes one window length later.
+Observed on real data, consecutive `fh` resets land 5h00–5h10 apart, the spread being
+sampling granularity, so the projection is accurate to a few minutes. `DeriveReset` is
+deliberately conservative and returns null — letting the UI say "current window" —
+whenever it would otherwise be guessing:
+
+- the window is idle (0% used), so no window is actually open;
+- no fall of ≥5 percentage points is visible in the retained history;
+- the projected reset has already passed, meaning the desktop app was closed across a
+  rollover and the history has a hole in it.
+
+That last case is common and is why an actively-idle machine shows a weekly countdown
+but no 5-hour one. Guessing is avoided on purpose: Anthropic's 5-hour window may either
+run as contiguous blocks or re-anchor to first use after a long idle, and the sampled
+history cannot distinguish the two. Derived times are marked approximate — the weekly
+reset note is prefixed `~` and gauge tooltips name the source.
+
+Samples are filtered to the org of the most recent sample, so switching organisations
+does not produce a reset derived from the wrong account's history.
+
 ### Implementation
-`Providers/Claude/`: `ClaudeProvider` + `ClaudeAuth` + `ClaudeModels.cs`. Reads the cache
-file and the account metadata, emits two gauges (5h, Weekly), a plan label, and a weekly
-reset note. A staleness warning is surfaced if the cache timestamp is older than 6 hours
-(Claude Code only refreshes it while running).
+`Providers/Claude/`: `ClaudeProvider` + `ClaudeAuth` + `ClaudeUsageSources` +
+`ClaudeModels.cs`. `ClaudeUsageSources` normalises whichever file it finds into a
+`ClaudeUsageSnapshot`; the provider turns that into two gauges (5h, Weekly) plus one per
+scoped model, a plan label, and a weekly reset note. A staleness warning appears when the
+figures are more than 6 hours old.
+
+`ClaudeAuth.IsConfigured` is deliberately broader than "the CLI signed in" — a
+desktop-only user never gets a `.claude.json`, which costs the plan label but nothing
+else.
+
+Failure isolation: a malformed or half-written source is skipped rather than failing the
+whole provider, so a corrupt CLI cache still leaves the desktop history usable.
 
 **Intentionally never read:** `%USERPROFILE%\.claude\.credentials.json` — that holds the
-secret OAuth token and is not needed since the cache is self-contained.
+secret OAuth token and is not needed since the usage files are self-contained.
 
-Verified against the real cache on this PC: 5h → 96% remaining, Weekly → 79%, plan
-"Claude Max 5x".
+Verified on a CLI machine (5h → 96% remaining, Weekly → 79%, plan "Claude Max 5x") and on
+a desktop-only machine (5h → 95%, Weekly → 89%, weekly reset derived as 7 Aug 06:01).
 
 ---
 

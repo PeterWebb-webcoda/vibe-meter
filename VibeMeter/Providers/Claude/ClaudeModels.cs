@@ -104,6 +104,50 @@ public class ClaudeLimitScopeModel
     public string? DisplayName { get; set; }
 }
 
+// --- Raw DTOs for the Claude desktop app's sampled usage history ---
+//
+// plan-usage-history.json is written by the Claude desktop app (which on Windows also
+// hosts Claude Code). It appends a compact sample every ~5 minutes while the app runs.
+// Unlike the CLI cache it carries no reset timestamps and no scoped limits — only the
+// two headline percentages — so resets are inferred from where the series drops.
+
+public class ClaudePlanUsageHistoryFile
+{
+    [JsonPropertyName("version")]
+    public int? Version { get; set; }
+
+    [JsonPropertyName("samples")]
+    public List<ClaudePlanUsageSample>? Samples { get; set; }
+}
+
+public class ClaudePlanUsageSample
+{
+    /// <summary>Sample time, Unix epoch milliseconds.</summary>
+    [JsonPropertyName("t")]
+    public long TimestampMs { get; set; }
+
+    /// <summary>Organisation the sample was taken under.</summary>
+    [JsonPropertyName("org")]
+    public string? Org { get; set; }
+
+    [JsonPropertyName("u")]
+    public ClaudePlanUsageValues? Usage { get; set; }
+
+    [JsonIgnore]
+    public DateTime ObservedAt => DateTimeOffset.FromUnixTimeMilliseconds(TimestampMs).LocalDateTime;
+}
+
+public class ClaudePlanUsageValues
+{
+    /// <summary>5-hour window, percentage already used (0–100).</summary>
+    [JsonPropertyName("fh")]
+    public int? FiveHour { get; set; }
+
+    /// <summary>7-day window, percentage already used (0–100).</summary>
+    [JsonPropertyName("sd")]
+    public int? SevenDay { get; set; }
+}
+
 // --- Account / plan metadata read from ~/.claude.json (oauthAccount block) ---
 // Contains no secrets — only identity, plan tier and organisation metadata.
 

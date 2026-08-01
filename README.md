@@ -14,7 +14,7 @@ matter the source.
 | Provider | Status | How it reads usage |
 |----------|--------|--------------------|
 | **Codex** (OpenAI) | ✅ Live | `~/.codex/auth.json` → ChatGPT `wham/usage` API (5h + weekly windows) |
-| **Claude Code** | ✅ Live | `~/.claude/usage_cache.json` (5h + weekly, plan tier) |
+| **Claude** | ✅ Live | `~/.claude/usage_cache.json`, else `%APPDATA%\Claude\plan-usage-history.json` (5h + weekly, plan tier) |
 | **Z.ai GLM** | ✅ Live | `api.z.ai/api/monitor/usage/quota/limit` via `ZAI_API_KEY` (5h, weekly, monthly) |
 | **Google AI Pro** | ⏸ Parked | No public usage API; see [`docs/provider-research.md`](docs/provider-research.md) |
 
@@ -36,8 +36,8 @@ VibeMeter is local-first:
 - It reads only local provider files (`~/.codex`, `~/.claude`) and, for Codex, calls
   OpenAI's own usage endpoint using the token the Codex CLI already stored.
 - It never sends your usage data anywhere, collects no telemetry, and has no accounts.
-- Claude usage is read entirely from the local cache Claude Code maintains — no token,
-  no network.
+- Claude usage is read entirely from the local files Claude already maintains (the CLI's
+  usage cache or the desktop app's usage history) — no token, no network.
 
 Settings are stored in `%APPDATA%\VibeMeter\settings.json`.
 
