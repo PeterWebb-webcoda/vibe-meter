@@ -16,8 +16,13 @@ namespace VibeMeter.Providers.Codex;
 /// the Codex CLI/Desktop writes. Each file carries:
 /// </para>
 /// <list type="bullet">
-/// <item><b>Model</b> on <c>turn_context</c> records at <c>payload.model</c> — one model
-/// per session (stable within a file).</item>
+/// <item><b>Model</b> on <c>turn_context</c> records at <c>payload.model</c>. This is
+/// <b>not</b> one stable model per file, and it is <b>not</b> guaranteed to precede the
+/// usage it describes: a session can switch model part-way through (21 files in the
+/// reference corpus do), usage can be written up to ~700 lines ahead of the first
+/// <c>turn_context</c> (10 files), and some sessions never write one at all (52 files).
+/// <c>session_meta</c> carries no model, so there is no earlier source. Attribution is
+/// therefore per record — see <see cref="ParseFileAsync"/>.</item>
 /// <item><b>Tokens</b> on <c>event_msg/token_count</c> records at
 /// <c>payload.info.last_token_usage</c> — these are per-response deltas (sum them); the
 /// sibling <c>total_token_usage</c> is cumulative and must NOT be summed.</item>
@@ -26,12 +31,12 @@ namespace VibeMeter.Providers.Codex;
 /// <b>Performance:</b> the corpus can be large (1GB+ with multi-hundred-MB files whose
 /// individual lines are tens of KB). To avoid re-reading the whole corpus every refresh,
 /// each file's parsed records are cached keyed on its <c>LastWriteTimeUtc</c>. Only files
-/// whose mtime changed (i.e. a live session is appending) are re-parsed; the rest are
-/// re-folded from cache. Lines are also substring-prefiltered before JSON parsing so the
-/// giant <c>session_meta</c>/message lines are skipped cheaply. The cache stores <b>raw
-/// token counts only</b> — cost is derived at fold time — so a rate-table change takes
-/// effect on the next fold without needing to bust the cache (see the FIX-PRICING-ACCURACY
-/// brief).
+/// whose mtime changed (i.e. a live session is appending) — or whose records are not all
+/// attributed to a model — are re-parsed; the rest are re-folded from cache. Lines are also
+/// substring-prefiltered before JSON parsing so the giant <c>session_meta</c>/message lines
+/// are skipped cheaply. The cache stores <b>raw token counts only</b> — cost is derived at
+/// fold time — so a rate-table change takes effect on the next fold without needing to bust
+/// the cache (see the FIX-PRICING-ACCURACY brief).
 /// </para>
 /// <para><b>Costs are API-equivalent estimates.</b> Codex subscription transcripts carry
 /// no per-request $ figure, so costs are computed from OpenAI's published API rates — see
@@ -43,6 +48,14 @@ public sealed class CodexCostCalculator
     private static readonly string SessionsDir = Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
         ".codex", "sessions");
+
+    /// <summary>
+    /// Label for usage that carries no model. Reserved for session files that record usage
+    /// but never write a <c>turn_context</c> — a real gap in the transcript, kept visible in
+    /// the UI (and priced at <see cref="DefaultRate"/>) rather than silently absorbed into
+    /// another model's total.
+    /// </summary>
+    private const string UnknownModel = "unknown";
 
     /// <summary>
     /// Per-file cache keyed by full path. The value holds the file's mtime (so we can
@@ -72,11 +85,23 @@ public sealed class CodexCostCalculator
         // 2. Refresh the cache: parse only files that are new or whose mtime changed.
         foreach (var (path, mtime) in liveFiles)
         {
-            if (FileCache.TryGetValue(path, out var cached) && cached.Mtime == mtime)
-                continue; // unchanged — reuse cached entries
+            // Reuse the cached parse only when the file is unchanged AND every in-window
+            // record was attributed to a model. Codex does not guarantee that a session's
+            // turn_context (which carries the model) precedes the token_count records it
+            // describes — in this corpus usage leads the model by up to ~700 lines, and
+            // some sessions never write a turn_context at all. Reading a session whose
+            // content stops short of that record therefore yields real usage with no
+            // model, and an mtime-only check would pin that "unknown" verdict for the
+            // whole process lifetime. Re-parsing such files is self-limiting: it stops as
+            // soon as the model resolves or the records age out of the 30-day window.
+            if (FileCache.TryGetValue(path, out var cached) && cached.Mtime == mtime &&
+                !cached.HasUnattributedRecords)
+            {
+                continue;
+            }
 
-            var (model, entries) = await ParseFileAsync(path);
-            FileCache[path] = new FileCacheEntry(mtime, model, entries);
+            var entries = await ParseFileAsync(path);
+            FileCache[path] = new FileCacheEntry(mtime, entries);
         }
 
         // 3. Evict cache entries for files no longer on disk (deleted/rolled sessions).
@@ -103,14 +128,27 @@ public sealed class CodexCostCalculator
         var weeklyModelStats = new Dictionary<string, ModelStats>();
         bool anyEstimated = false;
 
+        // Rates are resolved per record now that a single session can span models, so
+        // memoise the lookup — ResolveRate walks the rate table on every call.
+        var rateCache = new Dictionary<string, (ModelRate Rate, bool Estimated)>(StringComparer.Ordinal);
+
         foreach (var entry in FileCache.Values)
         {
-            var resolved = ResolveRate(entry.Model);
-            if (resolved.Estimated) anyEstimated = true;
-
             foreach (var r in entry.Records)
             {
                 if (r.TimestampUtc < monthAgo) continue;
+
+                // A null model means the file carried usage but no turn_context at all —
+                // surfaced honestly as "unknown" and priced at the fallback rate.
+                string model = r.Model ?? UnknownModel;
+
+                if (!rateCache.TryGetValue(model, out var resolved))
+                {
+                    resolved = ResolveRate(model);
+                    rateCache[model] = resolved;
+                }
+                // Only flag an estimate when a record actually lands in a displayed window.
+                if (resolved.Estimated) anyEstimated = true;
 
                 // Headline token count excludes cached input (near-free prompt-cache reuse
                 // at 10% of input). This matches the Claude headline definition (which
@@ -132,10 +170,10 @@ public sealed class CodexCostCalculator
                     weekCachedInput += r.CachedInput;
                     weekUncachedInput += uncachedInput;
 
-                    if (!weeklyModelStats.TryGetValue(entry.Model, out var stats))
+                    if (!weeklyModelStats.TryGetValue(model, out var stats))
                     {
                         stats = new ModelStats { IsEstimated = resolved.Estimated };
-                        weeklyModelStats[entry.Model] = stats;
+                        weeklyModelStats[model] = stats;
                     }
                     stats.Input += r.Input;
                     stats.Output += r.Output;
@@ -183,13 +221,30 @@ public sealed class CodexCostCalculator
     }
 
     /// <summary>
-    /// Parses one session file into its resolved model and a list of usage records
-    /// (per-response deltas). Only records within the 30-day monthly window are kept —
-    /// older ones can never re-enter any window, so dropping them bounds cache size.
+    /// Parses one session file into a list of usage records (per-response deltas), each
+    /// attributed to the model that produced it. Only records within the 30-day monthly
+    /// window are kept — older ones can never re-enter any window, so dropping them
+    /// bounds cache size.
     /// </summary>
-    private static async Task<(string Model, List<FileEntry> Records)> ParseFileAsync(string path)
+    /// <remarks>
+    /// <para><b>Model attribution is per record, not per file.</b> A session can switch
+    /// model part-way through (21 files in the reference corpus do, one mixing 526 turns of
+    /// one model with 921 of another), and the variants differ by up to 2.5x on input, so
+    /// pricing a whole file at whichever <c>turn_context</c> happened to be seen last
+    /// mis-bills every other turn. Each record therefore takes the model from the most
+    /// recent preceding <c>turn_context</c>.</para>
+    /// <para>Records that precede the file's first <c>turn_context</c> are back-filled from
+    /// it: Codex writes usage ahead of that record by up to ~700 lines, but the turn it
+    /// describes is the same one. Only a file with usage and <em>no</em> <c>turn_context</c>
+    /// anywhere leaves records as <see cref="UnknownModel"/> — a genuine data gap, which
+    /// the UI surfaces as an estimate rather than hiding.</para>
+    /// </remarks>
+    private static async Task<List<FileEntry>> ParseFileAsync(string path)
     {
-        string sessionModel = "unknown";
+        // Null until the first turn_context is seen; records captured before that are
+        // back-filled once we know it (or left unknown if the file never carries one).
+        string? currentModel = null;
+        string? firstModel = null;
         var records = new List<FileEntry>();
 
         // The monthly cutoff moves with wall-clock; using it at parse time means a record
@@ -220,7 +275,14 @@ public sealed class CodexCostCalculator
                     continue;
                 }
 
-                using var doc = JsonDocument.Parse(line);
+                // Parse per line: a single malformed or torn line (e.g. the partially
+                // flushed tail of a session Codex is still writing) must not abandon the
+                // rest of the file — the outer catch would otherwise cache a truncated
+                // read and silently under-report usage from that point on.
+                var parsed = TryParseLine(line);
+                if (parsed is null) continue;
+
+                using var doc = parsed;
                 var root = doc.RootElement;
                 if (root.ValueKind != JsonValueKind.Object) continue;
                 if (!root.TryGetProperty("timestamp", out var tsEl)) continue;
@@ -236,7 +298,7 @@ public sealed class CodexCostCalculator
                     continue;
                 }
 
-                // Capture the session model from any turn_context record.
+                // A turn_context switches the model for every subsequent record.
                 if (root.TryGetProperty("type", out var tcType) &&
                     tcType.ValueEquals("turn_context") &&
                     root.TryGetProperty("payload", out var tcPayload) &&
@@ -248,7 +310,8 @@ public sealed class CodexCostCalculator
                     if (!string.IsNullOrWhiteSpace(m))
                     {
                         // Normalise to lowercase (one anomalous "GPT-5.2" seen in the wild).
-                        sessionModel = m.ToLowerInvariant();
+                        currentModel = m.ToLowerInvariant();
+                        firstModel ??= currentModel;
                     }
                     continue; // turn_context carries no usage.
                 }
@@ -270,20 +333,57 @@ public sealed class CodexCostCalculator
                     usage.ValueKind != JsonValueKind.Object)
                     continue;
 
-                long input = usage.TryGetProperty("input_tokens", out var it) && it.TryGetInt64(out var iv) ? iv : 0;
-                long output = usage.TryGetProperty("output_tokens", out var ot) && ot.TryGetInt64(out var ov) ? ov : 0;
-                long cachedInput = usage.TryGetProperty("cached_input_tokens", out var ct) && ct.TryGetInt64(out var cv) ? cv : 0;
-                long reasoning = usage.TryGetProperty("reasoning_output_tokens", out var rt) && rt.TryGetInt64(out var rv) ? rv : 0;
-
-                records.Add(new FileEntry(timestamp, input, output, cachedInput, reasoning));
+                records.Add(new FileEntry(
+                    timestamp,
+                    ReadTokenCount(usage, "input_tokens"),
+                    ReadTokenCount(usage, "output_tokens"),
+                    ReadTokenCount(usage, "cached_input_tokens"),
+                    ReadTokenCount(usage, "reasoning_output_tokens"),
+                    currentModel));
             }
         }
         catch
         {
-            // Unreadable / malformed file — return whatever we parsed so far (possibly empty).
+            // Deliberately broad: this walks an opaque, third-party corpus of ~1700 files,
+            // so an unreadable or structurally surprising file must never fault the whole
+            // refresh. Malformed *lines* are handled above and no longer abandon the file,
+            // which is what this catch used to swallow.
+            // Returns whatever we parsed so far (possibly empty).
         }
 
-        return (sessionModel, records);
+        // Back-fill records that arrived before this file's first turn_context. They belong
+        // to that same turn; only a file with no turn_context at all stays unattributed.
+        for (int i = 0; i < records.Count; i++)
+        {
+            if (records[i].Model is null)
+                records[i] = records[i] with { Model = firstModel };
+        }
+
+        return records;
+    }
+
+    /// <summary>
+    /// Parses one JSONL line, returning <c>null</c> instead of throwing when the line is
+    /// not valid JSON (a torn write, or a corrupt record mid-file).
+    /// </summary>
+    private static JsonDocument? TryParseLine(string line)
+    {
+        try { return JsonDocument.Parse(line); }
+        catch (JsonException) { return null; }
+    }
+
+    /// <summary>
+    /// Reads a token count, treating a missing field or any non-numeric value as zero.
+    /// <see cref="JsonElement.TryGetInt64"/> throws when the element is not a number, so the
+    /// kind is checked first — otherwise one odd field would abandon the rest of the file.
+    /// </summary>
+    private static long ReadTokenCount(JsonElement usage, string propertyName)
+    {
+        return usage.TryGetProperty(propertyName, out var el) &&
+               el.ValueKind == JsonValueKind.Number &&
+               el.TryGetInt64(out var value)
+            ? value
+            : 0;
     }
 
     // --- Pricing ----------------------------------------------------------------
@@ -378,26 +478,38 @@ public sealed class CodexCostCalculator
         return inputCost + outputCost;
     }
 
-    /// <summary>One per-response usage record, cached. Raw tokens only — cost is derived at fold.</summary>
+    /// <summary>
+    /// One per-response usage record, cached. Raw tokens only — cost is derived at fold.
+    /// <paramref name="Model"/> is the model that produced this record, or <c>null</c> when
+    /// the session file carried no <c>turn_context</c> to attribute it to.
+    /// </summary>
     private sealed record FileEntry(
         DateTime TimestampUtc,
         long Input,
         long Output,
         long CachedInput,
-        long Reasoning);
+        long Reasoning,
+        string? Model);
 
-    /// <summary>Cache value: the file's mtime when parsed, its resolved model, and records.</summary>
+    /// <summary>Cache value: the file's mtime when parsed and its usage records.</summary>
     private sealed class FileCacheEntry
     {
-        public FileCacheEntry(DateTime mtime, string model, List<FileEntry> records)
+        public FileCacheEntry(DateTime mtime, List<FileEntry> records)
         {
             Mtime = mtime;
-            Model = model;
             Records = records;
+            HasUnattributedRecords = records.Exists(r => r.Model is null);
         }
         public DateTime Mtime { get; }
-        public string Model { get; }
         public List<FileEntry> Records { get; }
+
+        /// <summary>
+        /// True when at least one kept record could not be attributed to a model. Such an
+        /// entry is re-parsed on the next refresh even if the mtime is unchanged, so a
+        /// snapshot taken before the session's <c>turn_context</c> was written cannot pin an
+        /// "unknown" verdict for the process lifetime.
+        /// </summary>
+        public bool HasUnattributedRecords { get; }
     }
 
     private class ModelStats
