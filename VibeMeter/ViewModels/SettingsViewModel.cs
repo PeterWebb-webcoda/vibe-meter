@@ -117,15 +117,35 @@ public partial class SettingsViewModel : ObservableObject
             : "Not updated yet";
     }
 
+    /// <summary>
+    /// Registers or removes exactly one launcher in the per-user Startup folder.
+    /// </summary>
+    /// <remarks>
+    /// <para>The app has no single-instance guard, so leaving two launchers behind would put
+    /// two tray icons up at logon. A hand-made <c>VibeMeter.lnk</c> is therefore treated as
+    /// the launcher when one is present — it is the tidier of the two (a <c>.bat</c> flashes
+    /// a console window at logon) — and no <c>.bat</c> is added alongside it.</para>
+    /// <para>Disabling removes <em>both</em> forms, otherwise the toggle would appear to do
+    /// nothing whenever a shortcut was the active launcher.</para>
+    /// </remarks>
     private void UpdateStartupShortcut()
     {
         try
         {
             string startupFolder = Environment.GetFolderPath(Environment.SpecialFolder.Startup);
             string batPath = System.IO.Path.Combine(startupFolder, "VibeMeter.bat");
+            string lnkPath = System.IO.Path.Combine(startupFolder, "VibeMeter.lnk");
 
             if (LaunchAtStartup)
             {
+                // An existing shortcut already launches us — leave it as the sole launcher.
+                if (System.IO.File.Exists(lnkPath))
+                {
+                    if (System.IO.File.Exists(batPath))
+                        System.IO.File.Delete(batPath);
+                    return;
+                }
+
                 string exePath = Environment.ProcessPath
                     ?? System.IO.Path.Combine(System.AppContext.BaseDirectory, "VibeMeter.exe");
                 System.IO.File.WriteAllText(batPath, $"@echo off\nstart \"\" \"{exePath}\"");
@@ -134,6 +154,8 @@ public partial class SettingsViewModel : ObservableObject
             {
                 if (System.IO.File.Exists(batPath))
                     System.IO.File.Delete(batPath);
+                if (System.IO.File.Exists(lnkPath))
+                    System.IO.File.Delete(lnkPath);
             }
         }
         catch
