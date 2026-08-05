@@ -8,7 +8,7 @@
     <UseWPF>true</UseWPF>
     <RootNamespace>VibeMeter</RootNamespace>
     <AssemblyName>VibeMeter</AssemblyName>
-    <Version>0.4.0</Version>
+    <Version>0.4.1</Version>
     <Company>WebCoda</Company>
     <Product>VibeMeter</Product>
     <ApplicationIcon>icon.ico</ApplicationIcon>
