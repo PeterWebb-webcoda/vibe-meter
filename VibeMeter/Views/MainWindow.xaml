@@ -374,7 +374,7 @@
                                                         <StackPanel Orientation="Horizontal">
                                                             <TextBlock Text="{Binding WeekCostText}" FontSize="11" Foreground="{StaticResource SecondaryText}"/>
                                                             <TextBlock Text=" • " FontSize="11" Foreground="{StaticResource SecondaryText}"/>
-                                                            <TextBlock Text="{Binding TodayTokensText}" FontSize="11" Foreground="{StaticResource SecondaryText}"/>
+                                                            <TextBlock Text="{Binding WeekTokensText}" FontSize="11" Foreground="{StaticResource SecondaryText}"/>
                                                         </StackPanel>
                                                     </StackPanel>
                                                 </StackPanel>

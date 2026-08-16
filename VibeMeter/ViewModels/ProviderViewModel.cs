@@ -36,7 +36,7 @@ public sealed partial class ProviderViewModel : ObservableObject
     [ObservableProperty] private string? _todayCostText;
     [ObservableProperty] private string? _weekCostText;
     [ObservableProperty] private string? _monthCostText;
-    [ObservableProperty] private string? _todayTokensText;
+    [ObservableProperty] private string? _weekTokensText;
     [ObservableProperty] private bool _hasCostData;
     [ObservableProperty] private bool _isCostDetailsExpanded;
     public ObservableCollection<CostModelBreakdownItem> CostModelBreakdowns { get; } = new();
@@ -140,15 +140,17 @@ public sealed partial class ProviderViewModel : ObservableObject
         {
             case ClaudeCostDetailsData c:
                 PopulateFromCost(
-                    c.TodayTotalCostUsd, c.TodayTotalTokens,
-                    c.WeekTotalCostUsd, c.MonthTotalCostUsd,
+                    c.TodayTotalCostUsd,
+                    c.WeekTotalCostUsd, c.WeekTotalTokens,
+                    c.MonthTotalCostUsd,
                     c.WeeklyModelCosts.Select(m => (m.ModelId, m.TotalCostUsd)));
                 break;
 
             case CodexCostDetailsData x:
                 PopulateFromCost(
-                    x.TodayTotalCostUsd, x.TodayTotalTokens,
-                    x.WeekTotalCostUsd, x.MonthTotalCostUsd,
+                    x.TodayTotalCostUsd,
+                    x.WeekTotalCostUsd, x.WeekTotalTokens,
+                    x.MonthTotalCostUsd,
                     x.WeeklyModelCosts.Select(m => (m.ModelId, m.TotalCostUsd)));
                 break;
 
@@ -162,18 +164,20 @@ public sealed partial class ProviderViewModel : ObservableObject
 
     /// <summary>Shared populator — both Claude and Codex cost records carry the same shape.</summary>
     private void PopulateFromCost(
-        decimal todayCost, long todayTokens,
-        decimal weekCost, decimal monthCost,
+        decimal todayCost,
+        decimal weekCost, long weekTokens,
+        decimal monthCost,
         IEnumerable<(string ModelId, decimal TotalCostUsd)> weeklyModels)
     {
         HasCostData = true;
         TodayCostText = $"${todayCost:F2} today";
         WeekCostText = $"${weekCost:F2} this week";
         MonthCostText = $"${monthCost:F2} this month";
-        // Card headline uses the same "billed tokens" definition as the cost-details
-        // window: it excludes near-free cache reuse (Claude cache reads, Codex cached
-        // input), so it tracks spend and is comparable across providers (Bug 3).
-        TodayTokensText = FormatTokens(todayTokens) + " billed tokens";
+        // Token figure shares the weekly window of the cost it sits beside on the card.
+        // It uses the same "billed tokens" definition as the cost-details window: it
+        // excludes near-free cache reuse (Claude cache reads, Codex cached input), so it
+        // tracks spend and is comparable across providers (Bug 3).
+        WeekTokensText = FormatTokens(weekTokens) + " billed tokens";
 
         CostModelBreakdowns.Clear();
         decimal totalWeekCost = weekCost > 0 ? weekCost : 1;
