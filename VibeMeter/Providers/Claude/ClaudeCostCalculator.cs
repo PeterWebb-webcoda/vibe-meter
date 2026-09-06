@@ -112,9 +112,8 @@ public sealed class ClaudeCostCalculator
                 resolvedRates[r.Model] = resolved;
             }
             decimal cost = r.NativeCostUsd
-                ?? CalculateCost(resolved.MatchedId, resolved.Rate,
-                                 r.Input, r.Output, r.CacheWrite5m, r.CacheWrite1h, r.CacheRead,
-                                 r.TimestampUtc);
+                ?? CalculateCost(resolved.Rate,
+                                 r.Input, r.Output, r.CacheWrite5m, r.CacheWrite1h, r.CacheRead);
 
             // Monthly aggregation
             monthTokens += totalTokens;
@@ -322,23 +321,15 @@ public sealed class ClaudeCostCalculator
     /// <summary>
     /// Anthropic published-rate source. Every table entry is verified against this page.
     /// </summary>
-    private const string PricingSource = "https://platform.claude.com/docs/en/about-claude/models/overview";
+    private const string PricingSource = "https://platform.claude.com/docs/en/about-claude/pricing";
 
-    /// <summary>All rates verified 31/07/2026 against <see cref="PricingSource"/>.</summary>
-    private const string LastVerified = "2026-07-31";
-
-    /// <summary>
-    /// Sonnet 5 introductory pricing of $2 in / $10 out applies through 2026-08-31; the
-    /// standard $3 / $15 rate applies from 2026-09-01. Because cost is computed at fold
-    /// time where the per-record timestamp is available, each record is billed by its own
-    /// date — so every record inside the current rolling 7-day window bills at the intro
-    /// rate, and the switchover happens automatically as records age past 1 Sept.
-    /// </summary>
-    private static readonly DateTime Sonnet5StandardDate = new(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc);
+    /// <summary>All rates verified 06/09/2026 against <see cref="PricingSource"/>.</summary>
+    private const string LastVerified = "2026-09-06";
 
     /// <summary>
     /// One model's per-million-token rates. Cache ratios follow Anthropic's standard:
-    /// write 5m = 1.25x input, write 1h = 2x input, read = 0.1x input.
+    /// write 5m = 1.25x input, write 1h = 2x input, read = 0.1x input
+    /// (Fable 5.1 cache reads are 0.025x).
     /// </summary>
     /// <param name="IsVerified"><c>false</c> marks a rate as an unverified estimate so the
     /// UI can flag it (Bug 4) — every Claude entry below is verified.</param>
@@ -365,8 +356,10 @@ public sealed class ClaudeCostCalculator
             ("claude-opus-4-7",   new ModelRate(5.00m,  25.00m, 6.25m, 10.00m, 0.50m, true)),
             ("claude-opus-4-6",   new ModelRate(5.00m,  25.00m, 6.25m, 10.00m, 0.50m, true)),
             // Fable 5 is NOT Sonnet-priced: $10 in / $50 out — over 3x Sonnet, 2x Opus.
+            ("claude-fable-5-1",  new ModelRate(10.00m, 50.00m, 12.50m, 20.00m, 0.25m, true)),
             ("claude-fable-5",    new ModelRate(10.00m, 50.00m, 12.50m, 20.00m, 1.00m, true)),
-            ("claude-sonnet-5",   new ModelRate(3.00m,  15.00m, 3.75m,  6.00m,  0.30m, true)),
+            // Anthropic made the introductory rate permanent; the September increase was cancelled.
+            ("claude-sonnet-5",   new ModelRate(2.00m,  10.00m, 2.50m,  4.00m,  0.20m, true)),
             ("claude-sonnet-4-6", new ModelRate(3.00m,  15.00m, 3.75m,  6.00m,  0.30m, true)),
             ("claude-haiku-4-5",  new ModelRate(1.00m,  5.00m,  1.25m,  2.00m,  0.10m, true)),
         }
@@ -398,36 +391,23 @@ public sealed class ClaudeCostCalculator
     /// Computes per-record cost in USD from the resolved rate and raw token counts.
     /// <para>
     /// <c>input_tokens</c> in Anthropic's usage block is already the uncached portion, so
-    /// it bills at the full input rate; cache reads bill separately at 0.1x. Cache writes
+    /// it bills at the full input rate; cache reads bill separately at the model rate. Cache writes
     /// are split by TTL when the transcript provides the breakdown (Bug 5).
     /// </para>
     /// </summary>
     private static decimal CalculateCost(
-        string matchedId,
         in ModelRate rate,
         long input,
         long output,
         long cacheWrite5m,
         long cacheWrite1h,
-        long cacheRead,
-        DateTime timestampUtc)
+        long cacheRead)
     {
         decimal inPrice = rate.Input;
         decimal outPrice = rate.Output;
         decimal cw5mPrice = rate.CacheWrite5m;
         decimal cw1hPrice = rate.CacheWrite1h;
         decimal crPrice = rate.CacheRead;
-
-        // Sonnet 5 introductory pricing — see Sonnet5StandardDate. Cache ratios still
-        // hold against the intro input rate, so re-derive the cache prices from it.
-        if (matchedId == "claude-sonnet-5" && timestampUtc < Sonnet5StandardDate)
-        {
-            inPrice = 2.00m;
-            outPrice = 10.00m;
-            cw5mPrice = inPrice * 1.25m;
-            cw1hPrice = inPrice * 2.00m;
-            crPrice = inPrice * 0.10m;
-        }
 
         decimal inputCost = (input / 1_000_000m) * inPrice
                           + (cacheRead / 1_000_000m) * crPrice;

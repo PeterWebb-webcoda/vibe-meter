@@ -419,13 +419,15 @@ public sealed class CodexCostCalculator
     private static readonly (string Id, ModelRate Rate)[] RateTable =
         new (string Id, ModelRate Rate)[]
         {
-            // Verified 2026-07-31 against the live OpenAI model catalogue. OpenAI reduced
-            // Terra and Luna after the original 27/07 table was added.
-            ("gpt-5.6-sol",   new ModelRate(5.00m,  0.50m,   30.00m, true)),
+            // Standard short-context USD rates per 1M tokens, verified 06/09/2026:
+            // https://developers.openai.com/api/docs/pricing
+            // These are API-equivalent estimates, not subscription allowance costs.
+            ("gpt-6-astra",   new ModelRate(10.00m, 1.00m,   50.00m, true)),
+            ("gpt-5.6-sol",   new ModelRate(4.00m,  0.40m,   20.00m, true)),
             ("gpt-5.6-terra", new ModelRate(2.00m,  0.20m,   12.00m, true)),
             ("gpt-5.6-luna",  new ModelRate(0.20m,  0.02m,    1.20m, true)),
             // The unsuffixed alias routes to Sol. Keep this after the specific ids.
-            ("gpt-5.6",       new ModelRate(5.00m,  0.50m,   30.00m, true)),
+            ("gpt-5.6",       new ModelRate(4.00m,  0.40m,   20.00m, true)),
             ("gpt-5.5-pro",   new ModelRate(30.00m, 3.00m,  180.00m, true)),
             ("gpt-5.5",       new ModelRate(5.00m,  0.50m,   30.00m, true)),
             ("gpt-5.4-nano",  new ModelRate(0.20m,  0.02m,    1.25m, true)),
