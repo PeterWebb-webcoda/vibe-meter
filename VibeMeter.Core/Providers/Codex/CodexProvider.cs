@@ -107,46 +107,14 @@ public sealed class CodexProvider : IUsageProvider
             return Error(usageError ?? creditsError ?? "Unknown Codex error.");
         }
 
-        var gauges = new List<UsageGauge>();
+        var gauges = BuildGauges(usage, DisplayName);
         string? planLabel = usage?.PlanType;
+
         string? resetNote = null;
-
-        if (usage?.RateLimit?.PrimaryWindow is CodexUsageWindow primary)
+        if (usage?.RateLimit?.SecondaryWindow is CodexUsageWindow secondary &&
+            secondary.ResetAt.HasValue)
         {
-            gauges.Add(new UsageGauge(
-                Id: "codex-primary",
-                Title: GetDurationTitle(primary.LimitWindowSeconds),
-                Subtitle: DisplayName,
-                PercentRemaining: primary.RemainingPercent,
-                ResetAt: primary.ResetAt));
-        }
-
-        if (usage?.RateLimit?.SecondaryWindow is CodexUsageWindow secondary)
-        {
-            gauges.Add(new UsageGauge(
-                Id: "codex-weekly",
-                Title: "Weekly",
-                Subtitle: DisplayName,
-                PercentRemaining: secondary.RemainingPercent,
-                ResetAt: secondary.ResetAt));
-
-            if (secondary.ResetAt.HasValue)
-            {
-                resetNote = $"Weekly reset: {secondary.ResetAt.Value:MMM d, h:mm tt}";
-            }
-        }
-
-        // Codex-Spark (Bengal Fox) sub-feature, if present.
-        var spark = usage?.AdditionalRateLimits?
-            .FirstOrDefault(a => a.MeteredFeature == "codex_bengalfox");
-        if (spark?.RateLimit?.PrimaryWindow is CodexUsageWindow sparkPrimary)
-        {
-            gauges.Add(new UsageGauge(
-                Id: "codex-spark",
-                Title: "Spark",
-                Subtitle: "5h limit",
-                PercentRemaining: sparkPrimary.RemainingPercent,
-                ResetAt: sparkPrimary.ResetAt));
+            resetNote = $"Weekly reset: {secondary.ResetAt.Value:MMM d, h:mm tt}";
         }
 
         int? availableCount = usage?.RateLimitResetCredits?.AvailableCount;
@@ -199,6 +167,64 @@ public sealed class CodexProvider : IUsageProvider
         State = ProviderState.Error,
         ErrorMessage = message
     };
+
+    /// <summary>
+    /// Normalises the usage response into gauges. Internal for tests: the window
+    /// mapping below is contract-relevant (the agent publishes
+    /// <c>ResetWindowSeconds</c>), and this keeps it verifiable without an HTTP
+    /// round trip.
+    /// </summary>
+    internal static List<UsageGauge> BuildGauges(CodexUsageResponse? usage, string displayName)
+    {
+        var gauges = new List<UsageGauge>();
+
+        if (usage?.RateLimit?.PrimaryWindow is CodexUsageWindow primary)
+        {
+            gauges.Add(new UsageGauge(
+                Id: "codex-primary",
+                Title: GetDurationTitle(primary.LimitWindowSeconds),
+                Subtitle: displayName,
+                PercentRemaining: primary.RemainingPercent,
+                ResetAt: primary.ResetAt,
+                ResetWindowSeconds: WindowSecondsOrNull(primary.LimitWindowSeconds)));
+        }
+
+        if (usage?.RateLimit?.SecondaryWindow is CodexUsageWindow secondary)
+        {
+            gauges.Add(new UsageGauge(
+                Id: "codex-weekly",
+                Title: "Weekly",
+                Subtitle: displayName,
+                PercentRemaining: secondary.RemainingPercent,
+                ResetAt: secondary.ResetAt,
+                ResetWindowSeconds: WindowSecondsOrNull(secondary.LimitWindowSeconds)));
+        }
+
+        // Codex-Spark (Bengal Fox) sub-feature, if present.
+        var spark = usage?.AdditionalRateLimits?
+            .FirstOrDefault(a => a.MeteredFeature == "codex_bengalfox");
+        if (spark?.RateLimit?.PrimaryWindow is CodexUsageWindow sparkPrimary)
+        {
+            gauges.Add(new UsageGauge(
+                Id: "codex-spark",
+                Title: "Spark",
+                Subtitle: "5h limit",
+                PercentRemaining: sparkPrimary.RemainingPercent,
+                ResetAt: sparkPrimary.ResetAt,
+                ResetWindowSeconds: WindowSecondsOrNull(sparkPrimary.LimitWindowSeconds)));
+        }
+
+        return gauges;
+    }
+
+    /// <summary>
+    /// The wham API states each window's length outright in
+    /// <c>limit_window_seconds</c>, so the value travels as reported. An absent
+    /// field deserialises to 0, and a non-positive value is no window at all —
+    /// both stay <see langword="null"/> rather than being inferred.
+    /// </summary>
+    private static int? WindowSecondsOrNull(int limitWindowSeconds) =>
+        limitWindowSeconds > 0 ? limitWindowSeconds : null;
 
     private static string GetDurationTitle(int limitWindowSeconds)
     {

@@ -223,6 +223,9 @@ public sealed class GoogleProvider : IUsageProvider
                 lines.Add($"  {m.DisplayName}: {ToPercent(m.RemainingFraction)}%");
             }
 
+            // fetchAvailableModels carries no window field at all, so these
+            // gauges deliberately have no ResetWindowSeconds — see
+            // NamedWindowSeconds for the shape that does.
             gauges.Add(new UsageGauge(
                 Id: $"google-family-{Slug(family.Key)}",
                 Title: family.Key,
@@ -344,7 +347,7 @@ public sealed class GoogleProvider : IUsageProvider
     }
 
     /// <summary>One gauge per window ("Gemini 5h", "Gemini Weekly") for a windowed group.</summary>
-    private static IEnumerable<UsageGauge> BuildWindowedGauges(GoogleQuotaGroup group)
+    internal static IEnumerable<UsageGauge> BuildWindowedGauges(GoogleQuotaGroup group)
     {
         string family = ShortGroupName(group.DisplayName);
 
@@ -365,9 +368,29 @@ public sealed class GoogleProvider : IUsageProvider
                 Subtitle: null,
                 PercentRemaining: ToPercent(bucket.RemainingFraction),
                 ResetAt: bucket.ResetAtUtc?.ToLocalTime(),
+                ResetWindowSeconds: NamedWindowSeconds(bucket.Window),
                 TooltipText: BuildTooltip($"{group.DisplayName} — {bucket.DisplayName}", bucket.Description));
         }
     }
+
+    // The windowed quota summary names each bucket's window in its own structured
+    // "window" field ("5h" / "weekly") — the same status as Claude's five_hour /
+    // seven_day fields, so converting exactly those two names reads the field's own
+    // meaning rather than guessing. Any other value stays null, and so does the
+    // per-model quota shape (fetchAvailableModels), which carries no window at all.
+    internal const int FiveHourWindowSeconds = 5 * 60 * 60;      // 18 000
+    internal const int SevenDayWindowSeconds = 7 * 24 * 60 * 60; // 604 800
+
+    /// <summary>
+    /// Converts the bucket's declared window name into seconds; unknown names mean
+    /// the field said nothing we can read, so <see langword="null"/>.
+    /// </summary>
+    internal static int? NamedWindowSeconds(string window) => window.ToLowerInvariant() switch
+    {
+        "5h"     => FiveHourWindowSeconds,
+        "weekly" => SevenDayWindowSeconds,
+        _        => null,
+    };
 
     /// <summary>
     /// Buckets a model into a display family, e.g. "Gemini 3.1 Pro (High)" → "Gemini Pro",

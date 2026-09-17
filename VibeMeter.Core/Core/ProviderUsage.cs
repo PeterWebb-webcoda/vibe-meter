@@ -28,13 +28,21 @@ public enum ProviderState
 /// One normalised usage gauge (a rate-limit window, a quota, etc.).
 /// Pure data — UI concerns live in <c>UsageGaugeData</c>.
 /// </summary>
+/// <param name="ResetWindowSeconds">
+/// Length of the window this gauge measures, in seconds — but only when the
+/// provider genuinely reports it (e.g. Codex's <c>limit_window_seconds</c>, or a
+/// window the provider's own data names, such as Claude's five-hour / seven-day
+/// fields). <see langword="null"/> means the provider does not state a length;
+/// it must never be inferred from the gauge's id, title or display strings.
+/// </param>
 public sealed record UsageGauge(
     string Id,
     string Title,
     string? Subtitle,
     int PercentRemaining,
     DateTime? ResetAt,
-    string? TooltipText = null);
+    string? TooltipText = null,
+    int? ResetWindowSeconds = null);
 
 /// <summary>
 /// One normalised reset-credit entry (e.g. a Codex rate-limit reset credit).

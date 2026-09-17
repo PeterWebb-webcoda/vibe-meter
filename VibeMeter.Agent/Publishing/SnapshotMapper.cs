@@ -19,6 +19,12 @@ public sealed partial class SnapshotMapper
     public const int MaxProviders = 16;
     public const int MaxGauges = 16;
 
+    // Mirrors AiUsageRequestValidator's reset rules: resetWindowSeconds must be
+    // between 60 seconds and 366 days, and resetAt must fall within
+    // observedAt − 1 day .. observedAt + 366 days.
+    public const int MinResetWindowSeconds = 60;
+    public const int MaxResetWindowSeconds = 31_622_400;
+
     private const int MaxIdentifierLength = 64;
     private const int MaxTitleLength = 100;
     private const int MaxSubtitleLength = 200;
@@ -75,7 +81,7 @@ public sealed partial class SnapshotMapper
                 providerId,
                 MapState(usage.State),
                 CleanText(usage.PlanLabel, MaxPlanLabelLength),
-                MapGauges(usage.Gauges, providerId, warnings)));
+                MapGauges(usage.Gauges, providerId, observedAt, warnings)));
         }
 
         var request = new SnapshotRequest(SnapshotRequest.CurrentSchemaVersion, observedAt, providers);
@@ -111,6 +117,7 @@ public sealed partial class SnapshotMapper
     private IReadOnlyList<GaugeSnapshot> MapGauges(
         IReadOnlyList<UsageGauge> gauges,
         string providerId,
+        DateTimeOffset observedAt,
         List<string> warnings)
     {
         var mapped = new List<GaugeSnapshot>();
@@ -150,23 +157,65 @@ public sealed partial class SnapshotMapper
                 unique = baseId + tail;
             }
 
+            // The API accepts resetAt only together with resetWindowSeconds and
+            // bounds both — see MapReset for the emission rule.
+            var (resetAt, resetWindowSeconds) =
+                MapReset(gauge.ResetAt, gauge.ResetWindowSeconds, observedAt);
+
             mapped.Add(new GaugeSnapshot(
                 unique,
                 // Title is required by the API; fall back to the gauge id.
                 CleanText(gauge.Title, MaxTitleLength) ?? unique,
                 CleanText(gauge.Subtitle, MaxSubtitleLength),
                 Math.Clamp(gauge.PercentRemaining, 0, 100),
-
-                // VibeMeter gauges carry a reset timestamp but no window length,
-                // while the API accepts resetAt only together with
-                // resetWindowSeconds (60 s to 366 d). Guessing a window from the
-                // gauge id or title would fabricate data, so both fields are
-                // omitted and snapshots carry percentages only.
-                null,
-                null));
+                resetAt,
+                resetWindowSeconds));
         }
 
         return mapped;
+    }
+
+    /// <summary>
+    /// Decides the (resetAt, resetWindowSeconds) pair for one gauge. The API
+    /// accepts the two only as a pair — a lone half is rejected — and bounds
+    /// each: the window must be 60 s..366 d, and resetAt must be UTC with a zero
+    /// offset, within observedAt − 1 day .. observedAt + 366 days. When either
+    /// value is missing or fails its bound, the WHOLE pair is omitted: clamping
+    /// the window or trimming the timestamp would misreport a real provider
+    /// reading, and an honestly blank reset ring beats a plausible lie.
+    /// </summary>
+    internal static (DateTimeOffset? ResetAt, int? ResetWindowSeconds) MapReset(
+        DateTime? resetAt,
+        int? resetWindowSeconds,
+        DateTimeOffset observedAt)
+    {
+        if (resetAt is not { } reset
+            || resetWindowSeconds is not { } window
+            || window is < MinResetWindowSeconds or > MaxResetWindowSeconds)
+        {
+            return (null, null);
+        }
+
+        // Gauge timestamps are local DateTimes (each provider normalises to local
+        // for the UI); the API demands UTC with a zero offset.
+        DateTimeOffset utcReset;
+        try
+        {
+            utcReset = new DateTimeOffset(reset.ToUniversalTime());
+        }
+        catch (ArgumentException)
+        {
+            // A timestamp that cannot even be represented in UTC is outside the
+            // accepted range by definition.
+            return (null, null);
+        }
+
+        if (utcReset < observedAt.AddDays(-1) || utcReset > observedAt.AddDays(366))
+        {
+            return (null, null);
+        }
+
+        return (utcReset, window);
     }
 
     /// <summary>

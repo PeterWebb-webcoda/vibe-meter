@@ -26,6 +26,15 @@ public sealed class ClaudeProvider : IUsageProvider
     private static Task<ClaudeCostDetailsData?>? _costTask;
     private static ClaudeCostDetailsData? _lastCostData;
 
+    // Anthropic's data names these windows outright — the cache fields are
+    // literally "five_hour" and "seven_day", and the limit kinds are "session" /
+    // "weekly_all" / "weekly_scoped" — so these constants transcribe the window
+    // lengths the source itself declares. Nothing is inferred from a gauge title,
+    // id, or display string; a provider that only labels its windows is NOT
+    // granted a window here on that basis.
+    internal const int FiveHourWindowSeconds = 5 * 60 * 60;      // 18 000
+    internal const int SevenDayWindowSeconds = 7 * 24 * 60 * 60; // 604 800
+
     /// <summary>Production constructor.</summary>
     public ClaudeProvider() : this(new ClaudeAuth()) { }
 
@@ -81,51 +90,7 @@ public sealed class ClaudeProvider : IUsageProvider
         ClaudeCostDetailsData? costData = _lastCostData;
 
         // 4. Normalise into gauges.
-        var gauges = new List<UsageGauge>();
-        var provenance = Provenance(snapshot);
-
-        if (snapshot.FiveHourPercentUsed is { } fiveHourUsed)
-        {
-            gauges.Add(new UsageGauge(
-                Id: "claude-5h",
-                Title: "5h",
-                Subtitle: DisplayName,
-                PercentRemaining: RemainingFrom(fiveHourUsed),
-                ResetAt: snapshot.FiveHourResetAt,
-                TooltipText: Tooltip(
-                    costData != null ? $"Cost in last 5h: ${costData.FiveHourCostUsd:F2} ({costData.FiveHourTokens:N0} billed tokens)" : null,
-                    provenance)));
-        }
-
-        if (snapshot.SevenDayPercentUsed is { } sevenDayUsed)
-        {
-            gauges.Add(new UsageGauge(
-                Id: "claude-weekly",
-                Title: "Weekly",
-                Subtitle: DisplayName,
-                PercentRemaining: RemainingFrom(sevenDayUsed),
-                ResetAt: snapshot.SevenDayResetAt,
-                TooltipText: Tooltip(
-                    costData != null ? $"Cost in last 7 days: ${costData.WeekTotalCostUsd:F2} ({costData.WeekTotalTokens:N0} billed tokens)" : null,
-                    provenance)));
-        }
-
-        // Model-scoped weekly limits (e.g. a separate Fable 5 allowance) are only recorded
-        // by the CLI cache; the desktop history has no equivalent, so this list is simply
-        // empty for desktop-only users.
-        foreach (var limit in snapshot.ScopedLimits)
-        {
-            var modelName = limit.Scope?.Model?.DisplayName;
-            if (string.IsNullOrWhiteSpace(modelName)) continue;
-
-            gauges.Add(new UsageGauge(
-                Id: $"claude-weekly-{modelName.ToLowerInvariant()}",
-                Title: $"Weekly ({modelName})",
-                Subtitle: DisplayName,
-                PercentRemaining: RemainingFrom(limit.Percent ?? 0),
-                ResetAt: limit.ResetAt,
-                TooltipText: provenance));
-        }
+        var gauges = BuildGauges(snapshot, costData, DisplayName);
 
         string? planLabel = ClaudeAuth.FriendlyTier(account?.UserRateLimitTier);
         string? resetNote = null;
@@ -176,6 +141,73 @@ public sealed class ClaudeProvider : IUsageProvider
         State = ProviderState.Error,
         ErrorMessage = message
     };
+
+    /// <summary>
+    /// Normalises a usage snapshot into gauges. Internal for tests: the
+    /// named-window mapping below is contract-relevant (the agent publishes
+    /// <c>ResetWindowSeconds</c>), and this keeps it verifiable without real
+    /// Claude files on disk.
+    /// </summary>
+    internal static List<UsageGauge> BuildGauges(
+        ClaudeUsageSnapshot snapshot,
+        ClaudeCostDetailsData? costData,
+        string displayName)
+    {
+        var gauges = new List<UsageGauge>();
+        var provenance = Provenance(snapshot);
+
+        if (snapshot.FiveHourPercentUsed is { } fiveHourUsed)
+        {
+            gauges.Add(new UsageGauge(
+                Id: "claude-5h",
+                Title: "5h",
+                Subtitle: displayName,
+                PercentRemaining: RemainingFrom(fiveHourUsed),
+                ResetAt: snapshot.FiveHourResetAt,
+                ResetWindowSeconds: FiveHourWindowSeconds,
+                TooltipText: Tooltip(
+                    costData != null ? $"Cost in last 5h: ${costData.FiveHourCostUsd:F2} ({costData.FiveHourTokens:N0} billed tokens)" : null,
+                    provenance)));
+        }
+
+        if (snapshot.SevenDayPercentUsed is { } sevenDayUsed)
+        {
+            gauges.Add(new UsageGauge(
+                Id: "claude-weekly",
+                Title: "Weekly",
+                Subtitle: displayName,
+                PercentRemaining: RemainingFrom(sevenDayUsed),
+                ResetAt: snapshot.SevenDayResetAt,
+                ResetWindowSeconds: SevenDayWindowSeconds,
+                TooltipText: Tooltip(
+                    costData != null ? $"Cost in last 7 days: ${costData.WeekTotalCostUsd:F2} ({costData.WeekTotalTokens:N0} billed tokens)" : null,
+                    provenance)));
+        }
+
+        // Model-scoped weekly limits (e.g. a separate Fable 5 allowance) are only recorded
+        // by the CLI cache; the desktop history has no equivalent, so this list is simply
+        // empty for desktop-only users.
+        foreach (var limit in snapshot.ScopedLimits)
+        {
+            var modelName = limit.Scope?.Model?.DisplayName;
+            if (string.IsNullOrWhiteSpace(modelName)) continue;
+
+            gauges.Add(new UsageGauge(
+                Id: $"claude-weekly-{modelName.ToLowerInvariant()}",
+                Title: $"Weekly ({modelName})",
+                Subtitle: displayName,
+                PercentRemaining: RemainingFrom(limit.Percent ?? 0),
+                ResetAt: limit.ResetAt,
+
+                // ClaudeUsageSources only files limits with Kind
+                // "weekly_scoped" here, so the limit's own kind names its
+                // window as weekly — the same declared meaning as seven_day.
+                ResetWindowSeconds: SevenDayWindowSeconds,
+                TooltipText: provenance));
+        }
+
+        return gauges;
+    }
 
     /// <summary>Converts a "percent used" value into a clamped "percent remaining".</summary>
     private static int RemainingFrom(int usedPercent) =>

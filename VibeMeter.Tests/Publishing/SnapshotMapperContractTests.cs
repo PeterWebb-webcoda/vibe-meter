@@ -226,21 +226,31 @@ public sealed class SnapshotMapperContractTests
     }
 
     /// <summary>
-    /// The API accepts resetAt only paired with resetWindowSeconds, and the
-    /// mapper's decision is to omit both rather than fabricate a window —
-    /// pin that both stay null even when the source gauge carries a timestamp.
+    /// The API accepts resetAt only paired with resetWindowSeconds. The mapper
+    /// never sends half a pair: a reset time without a window (the provider does
+    /// not report a window length) and a window without a reset time are both
+    /// mapped to two nulls.
     /// </summary>
     [Fact]
-    public void ResetFields_AreAlwaysOmittedTogether_EvenWhenTheGaugeCarriesAResetTime()
+    public void ResetFields_AreEmittedOnlyAsAPair_NeverHalfOfOne()
     {
-        var gauges = new[] { new UsageGauge("primary", "Primary", null, 42, DateTime.UtcNow.AddDays(1)) };
+        var resetWithinRange = new DateTime(2026, 9, 18, 4, 30, 0, DateTimeKind.Utc);
+        var gauges = new[]
+        {
+            new UsageGauge("time-only", "Time only", null, 42, resetWithinRange),
+            new UsageGauge("window-only", "Window only", null, 42, null, null, 86_400),
+        };
 
         var mapped = _mapper.Map([Usage(id: "codex", gauges: gauges)], FixedUtcNow);
 
         using var document = JsonDocument.Parse(mapped.Json);
-        var gauge = document.RootElement.GetProperty("providers")[0].GetProperty("gauges")[0];
-        Assert.Equal(JsonValueKind.Null, gauge.GetProperty("resetAt").ValueKind);
-        Assert.Equal(JsonValueKind.Null, gauge.GetProperty("resetWindowSeconds").ValueKind);
+        var wireGauges = document.RootElement.GetProperty("providers")[0].GetProperty("gauges");
+        Assert.Equal(2, wireGauges.GetArrayLength());
+        foreach (var gauge in wireGauges.EnumerateArray())
+        {
+            Assert.Equal(JsonValueKind.Null, gauge.GetProperty("resetAt").ValueKind);
+            Assert.Equal(JsonValueKind.Null, gauge.GetProperty("resetWindowSeconds").ValueKind);
+        }
     }
 
     private static IEnumerable<string> PropertyNames(JsonElement element) =>

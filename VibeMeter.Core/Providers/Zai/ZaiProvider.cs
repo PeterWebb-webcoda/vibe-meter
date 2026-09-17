@@ -164,6 +164,11 @@ public sealed class ZaiProvider : IUsageProvider
                         _                   => ($"{type}_{unit}".ToLowerInvariant(), $"{type} (unit {unit})")
                     };
 
+                    // The monitor response states no window length — only the
+                    // (type, unit) codes, which are undocumented enum values whose
+                    // duration meanings were established by observation, not
+                    // declared by the API. ResetWindowSeconds therefore stays null:
+                    // mapping "unit 3" to five hours would be guessing.
                     gauges.Add(new UsageGauge(
                         Id: id,
                         Title: title,
