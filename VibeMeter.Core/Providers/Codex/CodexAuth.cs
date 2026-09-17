@@ -84,6 +84,41 @@ public sealed class CodexAuth
         }
     }
 
+    /// <summary>
+    /// Reads the <c>client_id</c> claim from the access token. A refresh has to
+    /// present the same client the token was issued to, and taking it from the
+    /// token avoids hard-coding an identifier that is not ours to pin.
+    /// </summary>
+    public static string? ReadClientId(string? accessToken) =>
+        ReadClaim(accessToken, "client_id", element => element.GetString());
+
+    private static T? ReadClaim<T>(string? accessToken, string claim, Func<JsonElement, T?> read)
+    {
+        if (string.IsNullOrWhiteSpace(accessToken))
+        {
+            return default;
+        }
+
+        var parts = accessToken.Split('.');
+        if (parts.Length < 2)
+        {
+            return default;
+        }
+
+        try
+        {
+            var payload = parts[1].Replace('-', '+').Replace('_', '/');
+            payload = payload.PadRight(payload.Length + ((4 - (payload.Length % 4)) % 4), '=');
+
+            using var document = JsonDocument.Parse(Convert.FromBase64String(payload));
+            return document.RootElement.TryGetProperty(claim, out var element) ? read(element) : default;
+        }
+        catch
+        {
+            return default;
+        }
+    }
+
     /// <summary>The resolved auth file path, for diagnostics.</summary>
     public static string AuthFilePath =>
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".codex", "auth.json");
