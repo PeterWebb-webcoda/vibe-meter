@@ -12,6 +12,14 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Device-code authentication for the headless agent. The token cache must use
+         MSAL's unprotected-file store on Linux: the default cross-platform cache wants
+         libsecret/a keyring, which a headless box does not have. -->
+    <PackageReference Include="Microsoft.Identity.Client" Version="4.79.0" />
+    <PackageReference Include="Microsoft.Identity.Client.Extensions.Msal" Version="4.79.0" />
+  </ItemGroup>
+
+  <ItemGroup>
     <!-- Lets the test suite run one host cycle directly and assert what would
          (or would not) be published, without racing the periodic loop. -->
     <InternalsVisibleTo Include="VibeMeter.Tests" />
