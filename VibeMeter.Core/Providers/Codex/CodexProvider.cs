@@ -58,6 +58,21 @@ public sealed class CodexProvider : IUsageProvider
             };
         }
 
+        // An expired token yields an opaque 401 from the usage endpoint, which reads as
+        // "Codex is broken" rather than "your sign-in lapsed". Say the actionable thing.
+        // Only the CLI renews this file, so an unattended machine cannot recover on its own.
+        var expiry = CodexAuth.ReadExpiry(token);
+        if (expiry is not null && expiry <= DateTimeOffset.UtcNow)
+        {
+            return new ProviderUsage
+            {
+                ProviderId = Id,
+                DisplayName = DisplayName,
+                State = ProviderState.NotConfigured,
+                ErrorMessage = $"Codex sign-in expired {expiry:yyyy-MM-dd}. Run `codex login` on this PC to renew it."
+            };
+        }
+
         // Trigger cost calculation in the background so we don't block normal UI load.
         // It scans the entire ~/.codex/sessions transcript corpus and can take several seconds.
         if (_costTask == null || _costTask.IsCompleted)
