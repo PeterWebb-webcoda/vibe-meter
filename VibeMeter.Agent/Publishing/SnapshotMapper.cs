@@ -137,10 +137,17 @@ public sealed partial class SnapshotMapper
             }
 
             // Gauge ids must be unique within a provider; suffix deterministically.
+            // The suffix must fit INSIDE the API's identifier limit, so trim the base
+            // to make room rather than appending past it - an over-long id fails
+            // validation for the whole snapshot, not just this gauge.
             var unique = id;
             for (var suffix = 2; !gaugeIds.Add(unique); suffix++)
             {
-                unique = $"{id}-{suffix}";
+                var tail = $"-{suffix}";
+                var baseId = id.Length + tail.Length > MaxIdentifierLength
+                    ? id[..(MaxIdentifierLength - tail.Length)]
+                    : id;
+                unique = baseId + tail;
             }
 
             mapped.Add(new GaugeSnapshot(
