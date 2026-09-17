@@ -1,0 +1,61 @@
+# VibeMeter.Agent systemd unit (Gladux / Linux).
+#
+# Install with:
+#   sudo cp deploy/vibemeter-agent.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now vibemeter-agent
+#
+# See docs/agent-deployment.md for the full install sequence.
+
+[Unit]
+Description=VibeMeter AI-usage agent (headless usage collector)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+
+# Non-root service account. Its HOME doubles as the install directory and the
+# place the agent looks for provider credentials (~/.claude, ~/.codex,
+# ~/.zcode) and writes its offline queue (~/.local/share/...).
+User=vibemeter
+Group=vibemeter
+
+# The agent's only configuration surface is environment variables (see
+# AgentConfig.cs). Secrets live in this root-owned file, NOT inline here —
+# one of the variables is a bearer token. PID 1 reads it before dropping
+# privileges, so 600/root:root is sufficient. Re-read only on restart.
+EnvironmentFile=/etc/vibemeter/agent.env
+
+WorkingDirectory=/opt/vibemeter
+ExecStart=/opt/vibemeter/VibeMeter.Agent
+
+# Pin HOME so the offline-queue path is deterministic regardless of systemd
+# version: $HOME/.local/share/VibeMeter/VibeMeter.Agent/offline-queue.
+Environment=HOME=/opt/vibemeter
+
+# The agent exits only on misconfiguration (exit 1) or an unexpected bug;
+# network and provider failures are handled in-process. Always restart, but
+# slowly enough that a config error becomes a visible, greppable 30-second
+# loop in the journal rather than a hot spin.
+Restart=always
+RestartSec=30
+
+# The agent logs to stdout/stderr only (AgentLog.cs); journald is the default
+# destination — spelled out here so nobody "fixes" it to a file silently.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=vibemeter-agent
+
+# Shutdown path: the agent handles SIGTERM, cancels the cycle and does one
+# bounded 5 s queue flush, so 30 s is generous.
+TimeoutStopSec=30
+
+# Hardening kept deliberately light: the agent must read provider credential
+# files in the service user's home and write the offline queue under
+# ~/.local/share, so ProtectHome= or ProtectSystem=strict would break it.
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

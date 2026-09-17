@@ -54,3 +54,9 @@ the cycle; the other machine's fresh reading then wins.
   400.
 - `not-configured`, `disabled`, and `error` reports keep their existing
   behaviour; gating only concerns data that is present but stale.
+
+## Deployment
+
+For building (`dotnet publish`), running unattended — systemd on Linux,
+a Scheduled Task on Windows — the environment variable reference, and
+troubleshooting, see [agent-deployment.md](agent-deployment.md).

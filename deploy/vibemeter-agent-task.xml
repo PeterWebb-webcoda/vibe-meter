@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  VibeMeter.Agent scheduled task for Windows ("Rock").
+
+  BEFORE IMPORTING, edit:
+    - Principals/Principal/UserId  -> ROCK\<task-account>
+    - Actions/Exec/Arguments       -> if the install path differs
+
+  Import (prompts for the account's password — it never touches the command line):
+    schtasks /Create /F /TN "VibeMeter Agent" /XML deploy\vibemeter-agent-task.xml
+
+  The action wraps the agent in cmd.exe solely to append stdout/stderr to a log
+  file: the agent logs to the console only (AgentLog.cs), and a scheduled task's
+  console is otherwise discarded. That makes the log the one place to look when
+  remoting in. The file grows without rotation — truncate it occasionally.
+
+  Notes:
+    - ExecutionTimeLimit PT0S: no limit. Task Scheduler's default 72-hour limit
+      would kill an unattended agent mid-flight.
+    - BootTrigger with 30 s delay: starts at boot whether or not anyone logs on.
+    - RestartOnFailure: relaunches after a crash or a misconfiguration exit (1),
+      mirroring systemd's Restart=always. A clean stop is NOT restarted; start
+      it manually with:  schtasks /Run /TN "VibeMeter Agent"
+    - Stopping the task hard-kills cmd.exe and the agent (no clean shutdown on
+      Windows). That is safe: the offline queue writes via temp-file-plus-rename
+      and sweeps abandoned temp files at next start.
+-->
+<Task version="1.2" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+  <RegistrationInfo>
+    <Description>VibeMeter headless AI-usage agent (publishes usage snapshots to the collection API).</Description>
+  </RegistrationInfo>
+  <Triggers>
+    <BootTrigger>
+      <Enabled>true</Enabled>
+      <Delay>PT30S</Delay>
+    </BootTrigger>
+  </Triggers>
+  <Principals>
+    <Principal id="Author">
+      <UserId>ROCK\vibemeter-agent</UserId>
+      <LogonType>Password</LogonType>
+      <RunLevel>LeastPrivilege</RunLevel>
+    </Principal>
+  </Principals>
+  <Settings>
+    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+    <AllowHardTerminate>true</AllowHardTerminate>
+    <StartWhenAvailable>true</StartWhenAvailable>
+    <RunOnlyIfNetworkAvailable>false</RunOnlyIfNetworkAvailable>
+    <IdleSettings>
+      <StopOnIdleEnd>false</StopOnIdleEnd>
+      <RestartOnIdle>false</RestartOnIdle>
+    </IdleSettings>
+    <AllowStartOnDemand>true</AllowStartOnDemand>
+    <RestartOnFailure>
+      <Interval>PT1M</Interval>
+      <Count>999</Count>
+    </RestartOnFailure>
+    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+    <Priority>7</Priority>
+    <RunOnlyIfIdle>false</RunOnlyIfIdle>
+    <WakeToRun>false</WakeToRun>
+    <Enabled>true</Enabled>
+    <Hidden>false</Hidden>
+  </Settings>
+  <Actions Context="Author">
+    <Exec>
+      <Command>C:\Windows\System32\cmd.exe</Command>
+      <Arguments>/c ""C:\Program Files\VibeMeter\Agent\VibeMeter.Agent.exe" >> "C:\ProgramData\VibeMeter\Agent\agent.log" 2>&amp;1"</Arguments>
+      <WorkingDirectory>C:\Program Files\VibeMeter\Agent</WorkingDirectory>
+    </Exec>
+  </Actions>
+</Task>
