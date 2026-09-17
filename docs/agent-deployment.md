@@ -12,20 +12,87 @@ variables, freshness gating, the offline queue — is documented in
 [`agent.md`](agent.md); this file covers builds, hosting, and troubleshooting
 only. Everything below is taken from `VibeMeter.Agent`'s source.
 
-## Authentication status: NOT YET IMPLEMENTED
+## Authentication
 
-> **The only credential mechanism that exists today is an environment
-> variable.** `EnvironmentAccessTokenProvider` (the sole `IAccessTokenProvider`
-> implementation) reads `VIBEMETER_AGENT_TOKEN` fresh from the process
-> environment on every publish; the token is never cached, logged, or written
-> to disk by the agent.
->
-> There is **no** interactive sign-in, **no** device-code prompt, **no**
-> MSAL/broker flow, and **no** token cache file. None of that exists yet. Real
-> authentication is planned against the `IAccessTokenProvider` seam
-> (`VibeMeter.Agent/AccessToken/IAccessTokenProvider.cs`); when it lands, this
-> section should be rewritten. Until then, obtaining the token value is a
-> manual, out-of-band step.
+The agent presents a bearer token to the collection API and obtains it one of
+two ways. **Setting `VIBEMETER_AGENT_CLIENT_ID` opts into the device-code
+flow; without it the token comes from the environment:**
+
+| | Device-code flow (Entra) | Environment token |
+|---|---|---|
+| Chosen by | `VIBEMETER_AGENT_CLIENT_ID` set | `VIBEMETER_AGENT_CLIENT_ID` unset or empty |
+| Required variables | `VIBEMETER_AGENT_CLIENT_ID` + `VIBEMETER_AGENT_TENANT_ID` + `VIBEMETER_AGENT_SCOPE` — all three; any missing ones are reported together at startup | `VIBEMETER_AGENT_TOKEN` |
+| `VIBEMETER_AGENT_TOKEN` | **not required — never read** | required; re-read from the environment on every publish, never written to disk |
+| Credential lives in | the MSAL token cache under the running user's profile (below) | nowhere — the variable is the only place it exists |
+
+### `--login` — interactive sign-in, once per machine, per user
+
+`VibeMeter.Agent --login` performs the interactive OAuth device-code flow: it
+prints a verification URL and a user code (MSAL's own message, on stdout and
+without the agent's log prefixes — it contains no token), you complete the
+sign-in in a browser, and the agent caches the resulting credential and
+exits. The acquired token itself is deliberately not echoed, stored or
+returned beyond the cache. On success it prints:
+
+```text
+[info] Signed in. The credential is cached for this user on this machine; the service can now start.
+```
+
+`--login` needs only the three device-code variables — no API base URL and no
+token. The cache is **per-user**, so sign in as *the account the service runs
+as*, on the machine the service runs on: see §2.1 and §3.1. A credential
+cached for the wrong user is the classic failure mode (§6.1).
+
+### The daemon never prompts
+
+The daemon runs the same flow with interactivity disabled: it can only renew
+silently from the cached credential. When that is impossible — never signed
+in on this machine, the cache belongs to another user, or the cached refresh
+token is no longer accepted (a password change or a sign-in-frequency policy
+does this) — it fails rather than prompting, and every publish attempt logs:
+
+> No usable cached credential, and interactive sign-in is disabled for the
+> daemon. Run the agent once with --login on this machine to sign in, then
+> start the service again.
+
+This is deliberate. A device code printed into a journal or log that nobody
+is reading looks exactly like a hang on an unattended machine; sign-in is a
+human, one-off act (`--login`), and the daemon only ever reuses its result.
+
+### The token cache
+
+MSAL writes the credential to a single file, `agent-token-cache.bin`, under
+the running user's per-user application-data directory plus `VibeMeter`:
+
+| Machine | Path (for the account running the agent) | Protection |
+|---|---|---|
+| Rock (Windows) | `%APPDATA%\VibeMeter\agent-token-cache.bin` → e.g. `C:\Users\vibemeter-agent\AppData\Roaming\VibeMeter\agent-token-cache.bin` | MSAL's encrypted store |
+| Gladux (Linux) | `$XDG_CONFIG_HOME` if set, else `$HOME/.config`, plus `VibeMeter\agent-token-cache.bin` — as installed (the unit pins `HOME=/opt/vibemeter`): `/opt/vibemeter/.config/VibeMeter/agent-token-cache.bin` | **none — an unprotected file** |
+| macOS (not a deployment target) | MSAL keychain storage | keychain |
+
+The unprotected Linux file is deliberate: MSAL's default Linux cache needs
+libsecret and a running keyring, neither of which a headless server has, and
+the failure would only surface obscurely at first refresh. **On Linux that
+file IS a credential.** The service user normally creates it, so it is
+already owned correctly — but check, and pin it:
+
+```bash
+sudo chown vibemeter:vibemeter /opt/vibemeter/.config/VibeMeter/agent-token-cache.bin
+sudo chmod 600 /opt/vibemeter/.config/VibeMeter/agent-token-cache.bin
+```
+
+If it shows `root:root`, somebody ran `--login` as root — see §6.1.
+
+### Status: implemented, unverified end to end
+
+Both token providers, the `--login` mode, the cache plumbing and the daemon's
+no-prompt behaviour exist in the source (`VibeMeter.Agent/AccessToken/`,
+`Program.cs`, `CliOptions.cs`; `--help` lists the variables). What has never
+happened is an actual device-code sign-in against the identity provider: the
+flow is **unverified end to end**, and the first `--login` on each machine is
+its real test. Note also that the client, tenant and scope identifiers are
+deliberately not defaulted anywhere in the source — this document uses
+placeholders only, and no real ids belong in the repository or these files.
 
 ## 1. Publishing a build
 
@@ -80,16 +147,40 @@ sudo chown -R vibemeter:vibemeter /opt/vibemeter
 # 3. Secrets file — created from the template, owned by root, mode 600.
 sudo mkdir -p /etc/vibemeter
 sudo install -o root -g root -m 600 deploy/vibemeter-agent.env.example /etc/vibemeter/agent.env
-sudoedit /etc/vibemeter/agent.env        # fill in the two required variables
+sudoedit /etc/vibemeter/agent.env        # fill in the variables for your chosen authentication mode
 
-# 4. Unit file.
+# 4. Device-code mode only: sign in ONCE, as the service user, before
+#    starting the service. See §2.1 — and why it must run as vibemeter.
+sudo bash -c '
+  set -a; . /etc/vibemeter/agent.env; set +a
+  runuser -u vibemeter -- env -u XDG_CONFIG_HOME HOME=/opt/vibemeter /opt/vibemeter/VibeMeter.Agent --login
+'
+
+# 5. Unit file.
 sudo cp deploy/vibemeter-agent.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable --now vibemeter-agent
 
-# 5. Confirm.
+# 6. Confirm.
 systemctl status vibemeter-agent
 ```
+
+### 2.1 Signing in on Gladux (`--login`)
+
+Run `--login` **as the `vibemeter` user**, with the same environment the
+service will see. A credential cached into root's or your own account's
+profile is invisible to the service, which then fails with the daemon's
+"no usable cached credential" error (§6.1). Step 4 of the install sequence
+sources `/etc/vibemeter/agent.env` (only root can read it), drops to the
+service user with `runuser`, and pins `HOME=/opt/vibemeter` to match the
+unit — so the cache lands exactly where the daemon will look for it:
+`/opt/vibemeter/.config/VibeMeter/agent-token-cache.bin`.
+
+The verification URL and user code appear on the terminal; complete the
+sign-in in a browser on any device. Afterwards, check the cache file and its
+ownership as shown in [Authentication](#the-token-cache) above. If the
+service is already running, `sudo systemctl stop vibemeter-agent` before
+signing in and `sudo systemctl start vibemeter-agent` afterwards.
 
 ### Reading the logs (journald)
 
@@ -149,7 +240,10 @@ icacls "C:\ProgramData\VibeMeter\Agent" /grant "ROCK\vibemeter-agent:(OI)(CI)M"
 #    account's password, which never appears on the command line.
 schtasks /Create /F /TN "VibeMeter Agent" /XML deploy\vibemeter-agent-task.xml
 
-# 4. Confirm.
+# 4. Device-code mode only: sign in ONCE, as the task account, once the
+#    device-code variables are in place — see §3.1 below.
+
+# 5. Confirm.
 schtasks /Query /TN "VibeMeter Agent" /V /FO LIST
 ```
 
@@ -174,9 +268,11 @@ Environment variables reach the task through normal Windows environment
 scopes, read once when the task's process starts:
 
 - **Machine scope (simplest)** — from an elevated prompt:
-  `setx /M VIBEMETER_API_BASE_URL "https://api.example.com"` and
-  `setx /M VIBEMETER_AGENT_TOKEN "<token>"`. Visible to every account,
-  including the task account.
+  `setx /M VIBEMETER_API_BASE_URL "https://api.example.com"`, plus — for
+  environment-token mode — `setx /M VIBEMETER_AGENT_TOKEN "<token>"`, or —
+  for device-code mode — the `VIBEMETER_AGENT_CLIENT_ID`,
+  `VIBEMETER_AGENT_TENANT_ID` and `VIBEMETER_AGENT_SCOPE` trio (these three
+  are not secrets). Visible to every account, including the task account.
 - **User scope** — log on once as the task account and run the same `setx`
   commands without `/M`. They land in that account's profile and are applied
   when the task logs the account on.
@@ -186,24 +282,49 @@ change is only picked up by processes **started afterwards** — stop and restar
 the task (`schtasks /End` then `schtasks /Run /TN "VibeMeter Agent"`) to
 re-read them.
 
+### 3.1 Signing in on Rock (`--login`)
+
+Run `--login` **as the task account**, not as yourself — the cache is
+per-user, and a credential cached into your own `%APPDATA%` is invisible to
+the task. From an interactive console:
+
+```powershell
+runas /user:ROCK\vibemeter-agent "C:\Program Files\VibeMeter\Agent\VibeMeter.Agent.exe --login"
+```
+
+`runas` prompts for the task account's password and opens a new console
+window as that account, showing the verification URL and user code; complete
+the sign-in in a browser. Machine-scope variables are visible to that
+session; user-scope variables apply because `runas` loads the account's
+profile. The cache lands in the task account's
+`%APPDATA%\VibeMeter\agent-token-cache.bin` — exactly where the task will
+look for it. Do **not** run `--login` through the Scheduled Task itself: the
+task's console output is discarded, so the code you must type would never be
+seen.
+
 ## 4. Environment variable reference
 
-Every variable the agent reads, from `AgentConfig.cs` (the token constant also
-appears in `EnvironmentAccessTokenProvider.cs`). All four are validated at
-startup; every problem found is aggregated into **one** message on stderr of
-the form `The VibeMeter agent is not configured correctly:` followed by a
+Every variable the agent reads, from `AgentConfig.cs` (the token constant
+also appears in `AccessToken\EnvironmentAccessTokenProvider.cs`; the
+device-code trio in `AccessToken\DeviceCodeAuthOptions.cs`). `--help` prints
+the same list. Variables are validated at startup; each validator aggregates
+its own problems into **one** message on stderr — `The VibeMeter agent is not
+configured correctly:` (base URL, token, interval, staleness) or `Device-code
+authentication is not configured:` (client id, tenant id, scope) — with a
 bullet per problem, and the process exits **1**.
 
 | Variable | Required | Default | If missing or wrong |
 |---|---|---|---|
-| `VIBEMETER_API_BASE_URL` | yes | — | Startup abort, exit 1. Must be an **absolute http(s) URL**; anything else (relative, `ftp:`, garbage) is rejected with the offending value echoed back. A trailing `/` is tolerated (trimmed). |
-| `VIBEMETER_AGENT_TOKEN` | yes | — | **Empty at startup**: abort, exit 1 (`set it to the agent's bearer token before starting`). Presence-only check at startup — a *wrong* value surfaces later per publish as an auth failure (see §6.1); the process stays up and queues snapshots. |
+| `VIBEMETER_API_BASE_URL` | yes | — | Startup abort, exit 1. Must be an **absolute http(s) URL**; anything else (relative, `ftp:`, garbage) is rejected with the offending value echoed back. A trailing `/` is tolerated (trimmed). Not needed by `--dry-run` or `--login`. |
+| `VIBEMETER_AGENT_TOKEN` | only when `VIBEMETER_AGENT_CLIENT_ID` is unset | — | When required, **empty at startup**: abort, exit 1 (`VIBEMETER_AGENT_TOKEN is required - set it to the agent's bearer token before starting.`). Presence-only check at startup — a *wrong* value surfaces later per publish as an auth failure (see §6.1); the process stays up and queues snapshots. In device-code mode it is never read. |
 | `VIBEMETER_AGENT_INTERVAL_SECONDS` | no | `300` | Non-integer, or less than `10`, aborts at startup, exit 1. |
 | `VIBEMETER_AGENT_STALENESS_MINUTES` | no | `20` | Non-integer, or less than `1`, aborts at startup, exit 1. |
+| `VIBEMETER_AGENT_CLIENT_ID` | no — its presence selects device-code authentication | — | If set (non-empty), `VIBEMETER_AGENT_TENANT_ID` and `VIBEMETER_AGENT_SCOPE` become required and `VIBEMETER_AGENT_TOKEN` stops being so. |
+| `VIBEMETER_AGENT_TENANT_ID` | with `VIBEMETER_AGENT_CLIENT_ID` | — | Startup abort, exit 1: `VIBEMETER_AGENT_TENANT_ID is required - set it to the Entra directory (tenant) id.` |
+| `VIBEMETER_AGENT_SCOPE` | with `VIBEMETER_AGENT_CLIENT_ID` | — | Startup abort, exit 1: `VIBEMETER_AGENT_SCOPE is required - set it to the delegated scope to request, e.g. api://<api-app-id>/Usage.Write.` |
 
-Nothing else is read. In particular the queue directory is **not**
-configurable: it is always `<user-data>\VibeMeter\VibeMeter.Agent\offline-queue`
-(see §5).
+The queue directory is **not** configurable: it is always
+`<user-data>\VibeMeter\VibeMeter.Agent\offline-queue` (see §5).
 
 Under systemd, `Restart=always` turns a startup abort into a restart every
 30 s; the journal shows the full message each attempt. On Windows the task's
@@ -221,7 +342,7 @@ The first cycle starts immediately; the exact wording comes from
 
 ```text
 2026-09-17 03:24:05 Z [info] Agent starting - publishing to https://api.example.com every 300s.
-2026-09-17 03:24:05 Z [info] Providers: claude, codex, zai, google. Offline queue: /opt/vibemeter/.local/share/VibeMeter/VibeMeter.Agent/offline-queue (capacity 500).
+2026-09-17 03:24:05 Z [info] Providers: claude, codex, zai, google. Offline queue: /opt/vibemeter/.config/VibeMeter/VibeMeter.Agent/offline-queue (capacity 500).
 2026-09-17 03:29:07 Z [info] Published snapshot for 4 provider(s) in 812 ms.
 ```
 
@@ -229,7 +350,9 @@ That third line, repeating once per interval, is the **only** positive proof
 that publishing works. Its absence for more than one interval while the process
 is active means something is failing — the matching `[warn]`/`[error]` line in
 the same window says which failure. A misconfigured agent instead prints the
-aggregated `not configured correctly` message (stderr) and exits 1.
+aggregated `not configured correctly` message (stderr) and exits 1. The
+second line prints the *actual* queue directory, which is the authoritative
+answer if anything in this document disagrees with it.
 
 ### Where the offline queue lives
 
@@ -240,7 +363,7 @@ credentials.
 
 | OS | Path (for the account running the agent) |
 |---|---|
-| Linux (Gladux, as installed) | `/opt/vibemeter/.local/share/VibeMeter/VibeMeter.Agent/offline-queue` (`$XDG_DATA_HOME` if set, else `$HOME/.local/share` — the unit pins `HOME=/opt/vibemeter`) |
+| Linux (Gladux, as installed) | `/opt/vibemeter/.config/VibeMeter/VibeMeter.Agent/offline-queue` (`$XDG_CONFIG_HOME` if set, else `$HOME/.config` — .NET maps `SpecialFolder.ApplicationData` there on Linux; the unit pins `HOME=/opt/vibemeter`) |
 | Windows (Rock) | `%APPDATA%\VibeMeter\VibeMeter.Agent\offline-queue` → e.g. `C:\Users\vibemeter-agent\AppData\Roaming\VibeMeter\VibeMeter.Agent\offline-queue` |
 
 The queue is normally empty (each publish deletes its entry). A **growing**
@@ -258,12 +381,18 @@ increasing N — is the reliable "failing to publish" signal.
 
 "Running but failing" looks like: process alive, no `Published snapshot` line
 for ≥ 1 interval, and instead `API unreachable (…)` (network/server),
-`Authentication failed (…)` (token), or `API rejected the snapshot permanently`
-(bad request / clock skew) every cycle, plus `Snapshot queued … (N pending)`.
+`Authentication failed (…)` (token/credential), or `API rejected the snapshot
+permanently` (bad request / clock skew) every cycle, plus `Snapshot queued …
+(N pending)`.
 
 ## 6. Troubleshooting
 
-### 6.1 Token missing or expired
+### 6.1 Authentication
+
+Which mode is in play is decided by `VIBEMETER_AGENT_CLIENT_ID`
+(see [Authentication](#authentication)).
+
+**Environment-token mode** (`VIBEMETER_AGENT_CLIENT_ID` unset):
 
 - **Missing at startup** → abort, exit 1, message names the variable:
   `VIBEMETER_AGENT_TOKEN is required - set it to the agent's bearer token before starting.`
@@ -277,10 +406,57 @@ for ≥ 1 interval, and instead `API unreachable (…)` (network/server),
   but a process's environment is fixed at start — so rotation is: update
   `/etc/vibemeter/agent.env` + `sudo systemctl restart vibemeter-agent`
   (Gladux), or re-run `setx` + `schtasks /End` and `/Run` (Rock).
-- **NOT YET IMPLEMENTED**: there is no automatic renewal, refresh, or
-  re-issue of this token anywhere in the codebase. When the token expires you
-  must supply a new value by hand. Real authentication is planned against
-  `IAccessTokenProvider` — see the notice at the top of this file.
+
+**Device-code mode** (`VIBEMETER_AGENT_CLIENT_ID` set):
+
+- **Not signed in, cache for the wrong user, or cached credential no longer
+  accepted** — three causes, one signature. A password change or a
+  sign-in-frequency policy invalidates the cached refresh token just like a
+  missing cache does; silent renewal fails, the daemon refuses to prompt, and
+  every publish logs:
+
+  ```text
+  [error] Authentication failed (No usable cached credential, and interactive sign-in is disabled for the daemon. Run the agent once with --login on this machine to sign in, then start the service again.). Snapshot queued; it will flush once VIBEMETER_AGENT_TOKEN is accepted.
+  ```
+
+  (The trailing variable name is literal in that message even in device-code
+  mode.) The snapshot is queued each cycle, so nothing is lost, and the
+  process stays up — this is the "running but failing to publish" signature
+  of §5, not a restart loop.
+- **Telling the three causes apart** (Gladux):
+  `sudo ls -l /opt/vibemeter/.config/VibeMeter/agent-token-cache.bin`.
+  *File missing* → never signed in as the service user. *File present but
+  owned by someone else* (typically `root:root`) → `--login` was run as the
+  wrong account; run it as `vibemeter` (§2.1). *File present, correct owner,
+  still failing* → the cached credential was invalidated by a password change
+  or a sign-in-frequency policy: run `--login` again as the service user and
+  restart the service.
+- **Missing or incomplete device-code configuration** → with
+  `VIBEMETER_AGENT_CLIENT_ID` set but the tenant id or scope absent, startup
+  aborts with exit 1 and one bullet per missing variable:
+
+  ```text
+  Device-code authentication is not configured:
+    - VIBEMETER_AGENT_TENANT_ID is required - set it to the Entra directory (tenant) id.
+  ```
+
+  Under systemd this is a restart loop per §4. All three variables are
+  reported together when several are missing.
+- **Signed in as the wrong user** deserves its own warning: `--login` run as
+  root (Gladux) or as your own account (Rock) writes the cache into *that*
+  account's profile, and the daemon — running as the service account — sees
+  none of it. It is the most likely reason a sign-in that worked at a desk
+  fails once deployed: always run `--login` as the account the service runs
+  as (§2.1, §3.1).
+- **Renewal** is automatic while the cached refresh token is accepted; there
+  is nothing to rotate by hand. Re-run `--login` only when it stops being
+  accepted (§6.1 above).
+- **`--login` itself fails** → it prints `Sign-in failed: <message>` (or
+  `Sign-in cancelled; nothing was cached.` if interrupted) and exits 1. The
+  device-code flow is unverified end to end (see
+  [Authentication](#authentication)) — if it fails, check the three
+  configured values first (client id, tenant id, scope), then the
+  registration in the Entra portal.
 
 ### 6.2 API unreachable
 

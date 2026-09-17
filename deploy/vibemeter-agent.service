@@ -17,21 +17,27 @@ Type=simple
 
 # Non-root service account. Its HOME doubles as the install directory and the
 # place the agent looks for provider credentials (~/.claude, ~/.codex,
-# ~/.zcode) and writes its offline queue (~/.local/share/...).
+# ~/.zcode), writes its offline queue (~/.config/VibeMeter/VibeMeter.Agent/
+# offline-queue) and — in device-code mode — keeps its MSAL token cache
+# (~/.config/VibeMeter/agent-token-cache.bin, created by running `--login` AS
+# THIS USER once before starting the service; see docs/agent-deployment.md).
 User=vibemeter
 Group=vibemeter
 
 # The agent's only configuration surface is environment variables (see
-# AgentConfig.cs). Secrets live in this root-owned file, NOT inline here —
-# one of the variables is a bearer token. PID 1 reads it before dropping
+# AgentConfig.cs and AccessToken/DeviceCodeAuthOptions.cs). Secrets live in
+# this root-owned file, NOT inline here — in environment-token mode one of
+# the variables IS the bearer token. PID 1 reads it before dropping
 # privileges, so 600/root:root is sufficient. Re-read only on restart.
 EnvironmentFile=/etc/vibemeter/agent.env
 
 WorkingDirectory=/opt/vibemeter
 ExecStart=/opt/vibemeter/VibeMeter.Agent
 
-# Pin HOME so the offline-queue path is deterministic regardless of systemd
-# version: $HOME/.local/share/VibeMeter/VibeMeter.Agent/offline-queue.
+# Pin HOME so the per-user paths are deterministic regardless of systemd
+# version or desktop environment variables: the offline queue lives at
+# $HOME/.config/VibeMeter/VibeMeter.Agent/offline-queue and, in device-code
+# mode, the token cache at $HOME/.config/VibeMeter/agent-token-cache.bin.
 Environment=HOME=/opt/vibemeter
 
 # The agent exits only on misconfiguration (exit 1) or an unexpected bug;
@@ -52,8 +58,9 @@ SyslogIdentifier=vibemeter-agent
 TimeoutStopSec=30
 
 # Hardening kept deliberately light: the agent must read provider credential
-# files in the service user's home and write the offline queue under
-# ~/.local/share, so ProtectHome= or ProtectSystem=strict would break it.
+# files in the service user's home and, under ~/.config, write both the
+# offline queue and (in device-code mode) the MSAL token cache, so
+# ProtectHome= or ProtectSystem=strict would break it.
 NoNewPrivileges=true
 PrivateTmp=true
 
