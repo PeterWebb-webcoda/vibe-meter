@@ -11,6 +11,7 @@ namespace VibeMeter.Tests;
 /// never created, no token is needed or leaked, and the exit code says whether
 /// anything was publishable.
 /// </summary>
+[Collection(EnvironmentCollection.Name)]
 public sealed class DryRunTests
 {
     private static readonly Uri ApiBaseUrl = new("https://api.example.com");

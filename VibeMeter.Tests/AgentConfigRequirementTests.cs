@@ -10,6 +10,7 @@ namespace VibeMeter.Tests;
 /// Values that ARE set are still validated in every mode. Environment
 /// variables are process-global, so every test saves and restores them.
 /// </summary>
+[Collection(EnvironmentCollection.Name)]
 public sealed class AgentConfigRequirementTests
 {
     private static readonly string[] AllVariables =
