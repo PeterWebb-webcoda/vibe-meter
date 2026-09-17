@@ -71,19 +71,25 @@ public sealed class CodexCostCalculator
 
         // 1. Enumerate current files + their mtimes. Build the set of paths still on disk
         //    so we can evict cache entries for deleted sessions afterwards.
-        var liveFiles = new List<(string Path, DateTime Mtime)>();
+        var liveFiles = new List<(string Path, DateTime Mtime, long Length)>();
         foreach (var path in Directory.EnumerateFiles(SessionsDir, "*.jsonl", SearchOption.AllDirectories))
         {
             DateTime mtime;
-            try { mtime = File.GetLastWriteTimeUtc(path); }
+            long length;
+            try
+            {
+                var file = new FileInfo(path);
+                mtime = file.LastWriteTimeUtc;
+                length = file.Length;
+            }
             catch { continue; }
-            liveFiles.Add((path, mtime));
+            liveFiles.Add((path, mtime, length));
         }
 
         var livePaths = liveFiles.Select(f => f.Path).ToHashSet(StringComparer.Ordinal);
 
         // 2. Refresh the cache: parse only files that are new or whose mtime changed.
-        foreach (var (path, mtime) in liveFiles)
+        foreach (var (path, mtime, length) in liveFiles)
         {
             // Reuse the cached parse only when the file is unchanged AND every in-window
             // record was attributed to a model. Codex does not guarantee that a session's
@@ -94,14 +100,17 @@ public sealed class CodexCostCalculator
             // model, and an mtime-only check would pin that "unknown" verdict for the
             // whole process lifetime. Re-parsing such files is self-limiting: it stops as
             // soon as the model resolves or the records age out of the 30-day window.
+            // Windows can defer the last-write timestamp while Codex keeps a rollout
+            // open. Its length still grows, so timestamp alone can freeze live usage.
             if (FileCache.TryGetValue(path, out var cached) && cached.Mtime == mtime &&
+                cached.Length == length &&
                 !cached.HasUnattributedRecords)
             {
                 continue;
             }
 
             var entries = await ParseFileAsync(path);
-            FileCache[path] = new FileCacheEntry(mtime, entries);
+            FileCache[path] = new FileCacheEntry(mtime, length, entries);
         }
 
         // 3. Evict cache entries for files no longer on disk (deleted/rolled sessions).
@@ -496,13 +505,15 @@ public sealed class CodexCostCalculator
     /// <summary>Cache value: the file's mtime when parsed and its usage records.</summary>
     private sealed class FileCacheEntry
     {
-        public FileCacheEntry(DateTime mtime, List<FileEntry> records)
+        public FileCacheEntry(DateTime mtime, long length, List<FileEntry> records)
         {
             Mtime = mtime;
+            Length = length;
             Records = records;
             HasUnattributedRecords = records.Exists(r => r.Model is null);
         }
         public DateTime Mtime { get; }
+        public long Length { get; }
         public List<FileEntry> Records { get; }
 
         /// <summary>

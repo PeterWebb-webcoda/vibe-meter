@@ -75,21 +75,66 @@ public sealed class ZaiProvider : IUsageProvider
 
             using var json = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync());
             
-            if (!json.RootElement.TryGetProperty("data", out var data))
+            var root = json.RootElement;
+            if (root.ValueKind != JsonValueKind.Object)
             {
                 return new ProviderUsage
                 {
                     ProviderId = Id,
                     DisplayName = DisplayName,
                     State = ProviderState.Error,
-                    ErrorMessage = "Unexpected API response shape (missing 'data')."
+                    ErrorMessage = "Unexpected API response shape (root is not an object)."
                 };
             }
 
-            string level = "unknown";
-            if (data.TryGetProperty("level", out var levelProp) && levelProp.ValueKind == JsonValueKind.String)
+            // The quota endpoint can answer HTTP 200 with an API-level failure carried in
+            // the JSON envelope, e.g. { "code": 500, "msg": "Internal service error",
+            // "success": false, "data": null }. Inspect the envelope before touching 'data'.
+            int? apiCode = TryGetInt(root, "code", out var codeValue) ? codeValue : null;
+            string? apiMessage = GetStringOrNull(root, "msg") ?? GetStringOrNull(root, "message");
+            bool apiFailed =
+                (root.TryGetProperty("success", out var successProp) && successProp.ValueKind == JsonValueKind.False)
+                || (apiCode is int codeNumber && codeNumber != 200 && codeNumber != 0);
+
+            if (apiFailed)
             {
-                level = levelProp.GetString() ?? "unknown";
+                return new ProviderUsage
+                {
+                    ProviderId = Id,
+                    DisplayName = DisplayName,
+                    State = ProviderState.Error,
+                    ErrorMessage = apiCode is int failedCode
+                        ? $"Z.ai API error {failedCode}: {apiMessage ?? "unknown error"}"
+                        : $"Z.ai API error: {apiMessage ?? "unknown error"}"
+                };
+            }
+
+            if (!root.TryGetProperty("data", out var data) || data.ValueKind == JsonValueKind.Null)
+            {
+                return new ProviderUsage
+                {
+                    ProviderId = Id,
+                    DisplayName = DisplayName,
+                    State = ProviderState.Error,
+                    ErrorMessage = "Unexpected API response shape (missing or null 'data')."
+                };
+            }
+
+            if (data.ValueKind != JsonValueKind.Object)
+            {
+                return new ProviderUsage
+                {
+                    ProviderId = Id,
+                    DisplayName = DisplayName,
+                    State = ProviderState.Error,
+                    ErrorMessage = "Unexpected API response shape ('data' is not an object)."
+                };
+            }
+
+            string? level = GetStringOrNull(data, "level");
+            if (string.IsNullOrEmpty(level))
+            {
+                level = "unknown";
             }
 
             string planLabel = level == "unknown" 
@@ -101,10 +146,15 @@ public sealed class ZaiProvider : IUsageProvider
             {
                 foreach (var limit in limits.EnumerateArray())
                 {
-                    string type = limit.TryGetProperty("type", out var tProp) ? tProp.GetString() ?? "" : "";
-                    int unit = limit.TryGetProperty("unit", out var uProp) ? uProp.GetInt32() : 0;
-                    int usedPct = limit.TryGetProperty("percentage", out var pProp) ? pProp.GetInt32() : 0;
-                    long resetMs = limit.TryGetProperty("nextResetTime", out var rProp) ? rProp.GetInt64() : 0;
+                    if (limit.ValueKind != JsonValueKind.Object)
+                    {
+                        continue;
+                    }
+
+                    string type = GetStringOrNull(limit, "type") ?? "";
+                    int unit = TryGetInt(limit, "unit", out var unitValue) ? unitValue : 0;
+                    int usedPct = TryGetInt(limit, "percentage", out var usedPctValue) ? usedPctValue : 0;
+                    long resetMs = TryGetInt64(limit, "nextResetTime", out var resetMsValue) ? resetMsValue : 0;
 
                     var (id, title) = (type, unit) switch
                     {
@@ -157,5 +207,29 @@ public sealed class ZaiProvider : IUsageProvider
                 ErrorMessage = $"Failed to fetch Z.ai quota: {ex.Message}"
             };
         }
+    }
+
+    /// <summary>Reads a JSON property as a string, or null when absent or not a string.</summary>
+    private static string? GetStringOrNull(JsonElement element, string name) =>
+        element.TryGetProperty(name, out var prop) && prop.ValueKind == JsonValueKind.String
+            ? prop.GetString()
+            : null;
+
+    /// <summary>Reads a JSON property as an int; false when absent or not an integer number.</summary>
+    private static bool TryGetInt(JsonElement element, string name, out int value)
+    {
+        value = 0;
+        return element.TryGetProperty(name, out var prop)
+            && prop.ValueKind == JsonValueKind.Number
+            && prop.TryGetInt32(out value);
+    }
+
+    /// <summary>Reads a JSON property as a long; false when absent or not an integer number.</summary>
+    private static bool TryGetInt64(JsonElement element, string name, out long value)
+    {
+        value = 0;
+        return element.TryGetProperty(name, out var prop)
+            && prop.ValueKind == JsonValueKind.Number
+            && prop.TryGetInt64(out value);
     }
 }
