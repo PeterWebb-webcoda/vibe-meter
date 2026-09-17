@@ -11,13 +11,30 @@ public sealed class AgentConfigException(string message) : Exception(message);
 /// front so a misconfigured agent fails fast with a clear message instead of
 /// limping through a run.
 /// </summary>
-public sealed record AgentConfig(Uri ApiBaseUrl, TimeSpan Interval, string QueueDirectory)
+/// <param name="StalenessThreshold">
+/// How old a provider's UNDERLYING data may be before the agent omits it from
+/// the snapshot — not how long ago the agent polled. File-derived providers
+/// (Claude reads <c>~/.claude/usage_cache.json</c> and the desktop app's
+/// history) only refresh while that surface runs on this machine, so an idle
+/// machine would otherwise stamp days-old figures with a fresh publish time.
+/// The collection API merges per provider newest-first by publish time, so a
+/// stale-but-published reading masks a fresh one from a machine in use; the
+/// agent therefore omits anything older than this threshold (never a
+/// state="stale" downgrade — the merge ignores state). The default of 20
+/// minutes rides out a few publish intervals (default interval: 5 minutes) of
+/// ordinary idleness while staying far inside Claude's shortest (5-hour)
+/// window. See <c>docs/agent.md</c>.
+/// </param>
+public sealed record AgentConfig(Uri ApiBaseUrl, TimeSpan Interval, string QueueDirectory, TimeSpan StalenessThreshold)
 {
     public const string ApiBaseUrlVariable = "VIBEMETER_API_BASE_URL";
     public const string IntervalSecondsVariable = "VIBEMETER_AGENT_INTERVAL_SECONDS";
     public const string TokenVariable = "VIBEMETER_AGENT_TOKEN";
+    public const string StalenessMinutesVariable = "VIBEMETER_AGENT_STALENESS_MINUTES";
     public const int MinimumIntervalSeconds = 10;
+    public const int MinimumStalenessMinutes = 1;
     public static readonly TimeSpan DefaultInterval = TimeSpan.FromMinutes(5);
+    public static readonly TimeSpan DefaultStalenessThreshold = TimeSpan.FromMinutes(20);
 
     /// <summary>
     /// Reads and validates configuration, aggregating every problem into one
@@ -65,6 +82,24 @@ public sealed record AgentConfig(Uri ApiBaseUrl, TimeSpan Interval, string Queue
             problems.Add($"{TokenVariable} is required - set it to the agent's bearer token before starting.");
         }
 
+        var stalenessThreshold = DefaultStalenessThreshold;
+        var rawStaleness = Environment.GetEnvironmentVariable(StalenessMinutesVariable);
+        if (!string.IsNullOrWhiteSpace(rawStaleness))
+        {
+            if (!int.TryParse(rawStaleness.Trim(), out var stalenessMinutes))
+            {
+                problems.Add($"{StalenessMinutesVariable} must be a whole number of minutes (got '{rawStaleness.Trim()}').");
+            }
+            else if (stalenessMinutes < MinimumStalenessMinutes)
+            {
+                problems.Add($"{StalenessMinutesVariable} must be at least {MinimumStalenessMinutes} minute(s).");
+            }
+            else
+            {
+                stalenessThreshold = TimeSpan.FromMinutes(stalenessMinutes);
+            }
+        }
+
         if (problems.Count > 0)
         {
             throw new AgentConfigException(
@@ -72,7 +107,7 @@ public sealed record AgentConfig(Uri ApiBaseUrl, TimeSpan Interval, string Queue
                 + Environment.NewLine + "  - " + string.Join(Environment.NewLine + "  - ", problems));
         }
 
-        return new AgentConfig(apiBaseUrl!, interval, DefaultQueueDirectory());
+        return new AgentConfig(apiBaseUrl!, interval, DefaultQueueDirectory(), stalenessThreshold);
     }
 
     private static string DefaultQueueDirectory() =>

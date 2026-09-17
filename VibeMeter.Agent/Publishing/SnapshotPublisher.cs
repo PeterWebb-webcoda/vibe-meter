@@ -41,6 +41,15 @@ public static class IdempotencyKey
 }
 
 /// <summary>
+/// Publish seam for the host loop, so a test can run a cycle and observe what
+/// would (or would not) go onto the wire without any network involved.
+/// </summary>
+public interface ISnapshotPublisher
+{
+    Task<PublishResult> PublishAsync(string document, CancellationToken cancellationToken);
+}
+
+/// <summary>
 /// POSTs snapshot documents to <c>{ApiBaseUrl}/api/v1/ai-usage/snapshots</c>.
 /// SECURITY: the bearer token is read per attempt from
 /// <see cref="IAccessTokenProvider"/> and attached only to the request header —
@@ -48,7 +57,7 @@ public static class IdempotencyKey
 /// Response bodies are truncated before surfacing (they are our own API's
 /// validation messages; provider responses never reach this class).
 /// </summary>
-public sealed class SnapshotPublisher : IDisposable
+public sealed class SnapshotPublisher : ISnapshotPublisher, IDisposable
 {
     private const string SnapshotsPath = "api/v1/ai-usage/snapshots";
     private const int MaxAttempts = 3;

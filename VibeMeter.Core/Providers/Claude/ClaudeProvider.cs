@@ -152,7 +152,12 @@ public sealed class ClaudeProvider : IUsageProvider
             ResetNote = resetNote,
             Gauges = gauges,
             ErrorMessage = errorMessage,
-            ExtensionData = costData
+            ExtensionData = costData,
+
+            // These figures come from local files that only refresh while a Claude
+            // surface runs on THIS machine, so the snapshot's own observation time —
+            // not this poll — is the honest age for the agent's freshness gate.
+            SourceObservedAt = new DateTimeOffset(snapshot.ObservedAt),
         };
     }
 

@@ -11,4 +11,10 @@
     <ProjectReference Include="..\VibeMeter.Core\VibeMeter.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Lets the test suite run one host cycle directly and assert what would
+         (or would not) be published, without racing the periodic loop. -->
+    <InternalsVisibleTo Include="VibeMeter.Tests" />
+  </ItemGroup>
+
 </Project>

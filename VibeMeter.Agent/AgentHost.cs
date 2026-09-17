@@ -22,14 +22,15 @@ public sealed class AgentHost
     private readonly AgentConfig _config;
     private readonly IReadOnlyList<IUsageProvider> _providers;
     private readonly SnapshotMapper _mapper;
-    private readonly SnapshotPublisher _publisher;
+    private readonly ISnapshotPublisher _publisher;
     private readonly OfflineQueue _queue;
+    private readonly FreshnessGate _freshnessGate;
 
     public AgentHost(
         AgentConfig config,
         IReadOnlyList<IUsageProvider> providers,
         SnapshotMapper mapper,
-        SnapshotPublisher publisher,
+        ISnapshotPublisher publisher,
         OfflineQueue queue)
     {
         _config = config;
@@ -37,6 +38,7 @@ public sealed class AgentHost
         _mapper = mapper;
         _publisher = publisher;
         _queue = queue;
+        _freshnessGate = new FreshnessGate(config.StalenessThreshold);
     }
 
     /// <summary>
@@ -68,7 +70,9 @@ public sealed class AgentHost
         AgentLog.Info("Agent stopping.");
     }
 
-    private async Task RunOneCycleAsync(CancellationToken cancellationToken)
+    /// <summary>One collect-gate-map-publish pass. Internal so tests can run a
+    /// single deterministic cycle instead of racing the periodic loop.</summary>
+    internal async Task RunOneCycleAsync(CancellationToken cancellationToken)
     {
         var cycle = Stopwatch.StartNew();
 
@@ -101,13 +105,42 @@ public sealed class AgentHost
             return;
         }
 
+        // Omit reports whose UNDERLYING data is too old, before anything is
+        // mapped or stamped with this cycle's publish time. The gate's class
+        // comment explains why omission - never a state="stale" downgrade - is
+        // the only correct treatment under the server's newest-first merge.
+        FreshnessGateResult freshness;
+        try
+        {
+            freshness = _freshnessGate.Apply(usages);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            AgentLog.Error($"Freshness check failed: {ex.Message}");
+            return;
+        }
+
+        foreach (var note in freshness.Notes)
+        {
+            AgentLog.Info(note);
+        }
+
+        foreach (var omission in freshness.Omissions)
+        {
+            AgentLog.Warn(omission);
+        }
+
         // Always UTC with zero offset - the API rejects any other offset.
         var observedAt = DateTimeOffset.UtcNow;
 
         MappedSnapshot mapped;
         try
         {
-            mapped = _mapper.Map(usages, observedAt);
+            mapped = _mapper.Map(freshness.Publishable, observedAt);
         }
         catch (OperationCanceledException)
         {
@@ -127,7 +160,12 @@ public sealed class AgentHost
         var providerCount = mapped.Request.Providers?.Count ?? 0;
         if (providerCount == 0)
         {
-            AgentLog.Warn("No provider produced a reportable result this cycle; nothing published.");
+            // The API requires 1..16 providers, so an all-stale cycle must
+            // publish nothing at all rather than an empty document.
+            AgentLog.Warn(freshness.Omissions.Count > 0
+                ? $"All {freshness.Omissions.Count} provider report(s) were omitted as stale; " +
+                  "publishing nothing this cycle so a fresher reading from another machine can win the server's newest-first merge."
+                : "No provider produced a reportable result this cycle; nothing published.");
             return;
         }
 

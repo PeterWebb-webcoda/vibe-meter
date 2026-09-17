@@ -71,6 +71,24 @@ public sealed class ProviderUsage
     public object? ExtensionData { get; init; }
     public DateTime FetchedAt { get; init; } = DateTime.Now;
 
+    /// <summary>
+    /// When the provider's UNDERLYING data was observed at its source — for a
+    /// file-derived provider such as Claude, when the source surface last
+    /// refreshed the local figures. <see langword="null"/> when the observation
+    /// is inherently current (fetched live over HTTP each cycle) or cannot be
+    /// determined; the agent's freshness gate treats null as fresh rather than
+    /// dropping data.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately distinct from <see cref="FetchedAt"/> (when this machine
+    /// polled) and from the wire snapshot's <c>observedAt</c> (publish time):
+    /// the collection API merges per provider newest-first by publish time, so
+    /// publishing old underlying data stamped "now" would mask a fresher
+    /// reading from another machine — which is why the agent omits stale
+    /// observations instead of reporting them as <c>state="stale"</c>.
+    /// </remarks>
+    public DateTimeOffset? SourceObservedAt { get; init; }
+
     /// <summary>Convenience factory for a "not yet implemented / coming soon" provider.</summary>
     public static ProviderUsage ComingSoon(string id, string displayName, string note) => new()
     {
