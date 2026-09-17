@@ -37,6 +37,9 @@ internal static class Program
                 Console.Error.WriteLine("Run with --help to see the accepted modes.");
                 return 2;
 
+            case AgentLaunchMode.Login:
+                return await RunLoginAsync();
+
             case AgentLaunchMode.DryRun:
                 return await RunDryRunAsync();
 
@@ -49,13 +52,81 @@ internal static class Program
         }
     }
 
+    /// <summary>
+    /// Interactive sign-in. Deliberately its own mode: the daemon must never
+    /// prompt, because on an unattended machine a device code printed to a log
+    /// nobody reads looks exactly like a hang.
+    /// </summary>
+    private static async Task<int> RunLoginAsync()
+    {
+        DeviceCodeAuthOptions options;
+        try
+        {
+            options = DeviceCodeAuthOptions.FromEnvironment();
+        }
+        catch (AgentConfigException ex)
+        {
+            AgentLog.Error(ex.Message);
+            return 1;
+        }
+
+        using var shutdown = RegisterShutdownHandlers();
+        var provider = new DeviceCodeAccessTokenProvider(options, allowInteractive: true);
+
+        try
+        {
+            // The token is acquired only to prove sign-in worked and to populate
+            // the cache; it is deliberately not echoed, stored or returned.
+            _ = await provider.GetAccessTokenAsync(shutdown.Token);
+            AgentLog.Info("Signed in. The credential is cached for this user on this machine; the service can now start.");
+            return 0;
+        }
+        catch (OperationCanceledException)
+        {
+            AgentLog.Warn("Sign-in cancelled; nothing was cached.");
+            return 1;
+        }
+        catch (Exception ex)
+        {
+            AgentLog.Error($"Sign-in failed: {ex.Message}");
+            return 1;
+        }
+    }
+
+    /// <summary>
+    /// Chooses how the agent authenticates. Setting the client id opts into the
+    /// device-code flow; otherwise the bearer token comes from the environment.
+    /// The daemon never signs in interactively - it can only reuse what
+    /// <c>--login</c> cached, and says so if that is missing.
+    /// </summary>
+    internal static IAccessTokenProvider CreateAccessTokenProvider()
+    {
+        var clientId = Environment.GetEnvironmentVariable(DeviceCodeAuthOptions.ClientIdVariable);
+        if (string.IsNullOrWhiteSpace(clientId))
+        {
+            return new EnvironmentAccessTokenProvider();
+        }
+
+        return new DeviceCodeAccessTokenProvider(
+            DeviceCodeAuthOptions.FromEnvironment(),
+            allowInteractive: false);
+    }
+
     /// <summary>The daemon and --once paths: full configuration, real publisher.</summary>
     private static async Task<int> RunConfiguredAsync(AgentLaunchMode mode)
     {
+        // When device-code authentication is configured the bearer token comes
+        // from the cached credential, so VIBEMETER_AGENT_TOKEN is not required -
+        // demanding it would make a correctly configured machine refuse to start.
+        var usingDeviceCode = !string.IsNullOrWhiteSpace(
+            Environment.GetEnvironmentVariable(DeviceCodeAuthOptions.ClientIdVariable));
+
         AgentConfig config;
         try
         {
-            config = AgentConfig.FromEnvironment();
+            config = AgentConfig.FromEnvironment(
+                requireApiBaseUrl: true,
+                requireToken: !usingDeviceCode);
         }
         catch (AgentConfigException ex)
         {
@@ -67,7 +138,18 @@ internal static class Program
 
         var queue = new OfflineQueue(config.QueueDirectory);
         // Non-null: FromEnvironment() requires a base URL - only --dry-run runs without one.
-        using var publisher = new SnapshotPublisher(config.ApiBaseUrl!, new EnvironmentAccessTokenProvider());
+        IAccessTokenProvider tokenProvider;
+        try
+        {
+            tokenProvider = CreateAccessTokenProvider();
+        }
+        catch (AgentConfigException ex)
+        {
+            AgentLog.Error(ex.Message);
+            return 1;
+        }
+
+        using var publisher = new SnapshotPublisher(config.ApiBaseUrl!, tokenProvider);
         var host = new AgentHost(config, CreateProviders(), new SnapshotMapper(), publisher, queue);
 
         if (mode == AgentLaunchMode.Once)

@@ -12,6 +12,9 @@ public enum AgentLaunchMode
     /// <summary>--dry-run (alone or alongside --once): collect and print, never publish.</summary>
     DryRun,
 
+    /// <summary>--login: interactive device-code sign-in, then exit.</summary>
+    Login,
+
     /// <summary>--help: show the modes and environment variables.</summary>
     Help,
 
@@ -32,6 +35,7 @@ public sealed record CliOptions(AgentLaunchMode Mode, string? UsageError = null)
     {
         var once = false;
         var dryRun = false;
+        var login = false;
         var help = false;
         var unknown = new List<string>();
 
@@ -45,6 +49,10 @@ public sealed record CliOptions(AgentLaunchMode Mode, string? UsageError = null)
 
                 case "--dry-run":
                     dryRun = true;
+                    break;
+
+                case "--login":
+                    login = true;
                     break;
 
                 case "--help" or "-h":
@@ -61,13 +69,19 @@ public sealed record CliOptions(AgentLaunchMode Mode, string? UsageError = null)
         {
             return new CliOptions(
                 AgentLaunchMode.UsageError,
-                $"Unrecognised argument(s): {string.Join(", ", unknown)}. Only --once, --dry-run and --help are accepted.");
+                $"Unrecognised argument(s): {string.Join(", ", unknown)}. Only --login, --once, --dry-run and --help are accepted.");
         }
 
-        // --help wins over everything; --once --dry-run behaves as a dry-run.
+        // --help wins over everything; --login is next because signing in is a
+        // deliberate one-off act; --once --dry-run behaves as a dry-run.
         if (help)
         {
             return new CliOptions(AgentLaunchMode.Help);
+        }
+
+        if (login)
+        {
+            return new CliOptions(AgentLaunchMode.Login);
         }
 
         if (dryRun)
@@ -86,7 +100,7 @@ public sealed record CliOptions(AgentLaunchMode Mode, string? UsageError = null)
     public const string HelpText = """
         VibeMeter.Agent - headless AI-usage collector for the VibeMeter collection API.
 
-        Usage: VibeMeter.Agent [--once | --dry-run | --help]
+        Usage: VibeMeter.Agent [--login | --once | --dry-run | --help]
 
         Modes:
           (no arguments)  Daemon: collect from every provider and publish a snapshot
@@ -100,6 +114,9 @@ public sealed record CliOptions(AgentLaunchMode Mode, string? UsageError = null)
                           collection API and needs no token - made for verifying a
                           new machine before authentication exists. Exit 0 when at
                           least one provider is publishable; non-zero when none is.
+          --login         Sign in interactively using the device-code flow and
+                          cache the result, then exit. Run this ONCE per machine
+                          before starting the service. The daemon never prompts.
           --help          Show this help.
 
           --once --dry-run behaves as --dry-run. Unrecognised arguments are an error.
@@ -117,6 +134,16 @@ public sealed record CliOptions(AgentLaunchMode Mode, string? UsageError = null)
           VIBEMETER_AGENT_STALENESS_MINUTES  How old a provider's underlying data
                                              may be before it is omitted, in
                                              minutes (default 20, minimum 1).
+          VIBEMETER_AGENT_CLIENT_ID          Entra application (client) id of the
+                                             agent's public-client registration.
+                                             When set, the agent authenticates by
+                                             device code and ignores
+                                             VIBEMETER_AGENT_TOKEN.
+          VIBEMETER_AGENT_TENANT_ID          Entra directory (tenant) id. Required
+                                             with VIBEMETER_AGENT_CLIENT_ID.
+          VIBEMETER_AGENT_SCOPE              Delegated scope to request, e.g.
+                                             api://<api-app-id>/Usage.Write.
+                                             Required with VIBEMETER_AGENT_CLIENT_ID.
 
         Exit codes: 0 success (see the mode descriptions) · 1 runtime failure (bad
         configuration, failed cycle, nothing publishable) · 2 usage error.
