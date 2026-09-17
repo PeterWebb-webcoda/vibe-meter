@@ -1,4 +1,5 @@
 <Solution>
+  <Project Path="VibeMeter.Agent/VibeMeter.Agent.csproj" />
   <Project Path="VibeMeter.Core/VibeMeter.Core.csproj" />
   <Project Path="VibeMeter/VibeMeter.csproj" />
 </Solution>
