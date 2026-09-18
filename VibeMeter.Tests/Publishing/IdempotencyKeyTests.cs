@@ -1,6 +1,6 @@
 using System.Text.Json;
 using System.Text.RegularExpressions;
-using VibeMeter.Agent.Publishing;
+using VibeMeter.Publishing;
 using VibeMeter.Core;
 using Xunit;
 

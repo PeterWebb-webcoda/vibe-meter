@@ -1,5 +1,5 @@
 using VibeMeter.Agent;
-using VibeMeter.Agent.Publishing;
+using VibeMeter.Publishing;
 using VibeMeter.Core;
 using Xunit;
 

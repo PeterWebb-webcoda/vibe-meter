@@ -2,7 +2,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using VibeMeter.Core;
 
-namespace VibeMeter.Agent.Publishing;
+namespace VibeMeter.Publishing;
 
 /// <summary>
 /// Maps VibeMeter <see cref="ProviderUsage"/> reports onto the collection API's

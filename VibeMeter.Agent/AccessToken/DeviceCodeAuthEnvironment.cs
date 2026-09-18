@@ -1,26 +1,18 @@
+using VibeMeter.Publishing.AccessToken;
+
 namespace VibeMeter.Agent.AccessToken;
 
 /// <summary>
-/// Identity configuration for <see cref="DeviceCodeAccessTokenProvider"/>.
+/// Reads <see cref="DeviceCodeAuthOptions"/> from the headless agent's
+/// environment. Deliberately host-side: the variable names are the agent's own,
+/// and a second host (the tray app) will read the same options from wherever it
+/// keeps its settings rather than inheriting these.
 /// </summary>
-/// <remarks>
-/// Every value is required from the environment and none is defaulted in source.
-/// The client, tenant and scope identifiers are not secrets, but baking a
-/// particular organisation's directory into this repository would tie a general
-/// tool to one tenant; keeping them in configuration leaves it portable.
-/// </remarks>
-public sealed record DeviceCodeAuthOptions(string ClientId, string TenantId, string Scope, string CacheDirectory)
+public static class DeviceCodeAuthEnvironment
 {
     public const string ClientIdVariable = "VIBEMETER_AGENT_CLIENT_ID";
     public const string TenantIdVariable = "VIBEMETER_AGENT_TENANT_ID";
     public const string ScopeVariable = "VIBEMETER_AGENT_SCOPE";
-
-    /// <summary>The MSAL token cache file name. The directory is per-user.</summary>
-    public const string CacheFileName = "agent-token-cache.bin";
-
-    public string Authority => $"https://login.microsoftonline.com/{TenantId}";
-
-    public string[] Scopes => [Scope];
 
     /// <summary>
     /// Reads the options from the environment, reporting every missing variable

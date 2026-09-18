@@ -1,7 +1,7 @@
 using System.Text.Json;
 using VibeMeter.Agent;
-using VibeMeter.Agent.Publishing;
 using VibeMeter.Core;
+using VibeMeter.Publishing;
 using Xunit;
 
 namespace VibeMeter.Tests;

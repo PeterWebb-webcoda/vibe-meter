@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Deliberately NOT net10.0-windows: the WPF tray app and the headless
+         agent both consume this library, so it must stay platform-neutral. -->
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VibeMeter.Core\VibeMeter.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Device-code authentication for a headless host. The token cache must use
+         MSAL's unprotected-file store on Linux: the default cross-platform cache wants
+         libsecret/a keyring, which a headless box does not have. -->
+    <PackageReference Include="Microsoft.Identity.Client" Version="4.79.0" />
+    <PackageReference Include="Microsoft.Identity.Client.Extensions.Msal" Version="4.79.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Lets the test suite drive the publish half directly - and reach the
+         internal helpers the mapper and publisher expose for testing. -->
+    <InternalsVisibleTo Include="VibeMeter.Tests" />
+  </ItemGroup>
+
+</Project>

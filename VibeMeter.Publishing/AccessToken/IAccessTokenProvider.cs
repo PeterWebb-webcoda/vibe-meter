@@ -1,4 +1,4 @@
-namespace VibeMeter.Agent.AccessToken;
+namespace VibeMeter.Publishing.AccessToken;
 
 /// <summary>
 /// Supplies the bearer token the agent presents to the collection API.

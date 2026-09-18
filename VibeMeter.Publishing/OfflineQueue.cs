@@ -1,8 +1,7 @@
 using System.Globalization;
 using System.Text;
-using VibeMeter.Agent.Publishing;
 
-namespace VibeMeter.Agent;
+namespace VibeMeter.Publishing;
 
 /// <summary>
 /// Durable, bounded FIFO of snapshot documents awaiting upload. One UTF-8 file
@@ -40,6 +39,14 @@ public sealed class OfflineQueue
     private readonly string _directory;
     private readonly int _capacity;
 
+    /// <summary>
+    /// Opens (creating if need be) the queue in <paramref name="directory"/>.
+    /// The directory is deliberately the CALLER's to choose and this library
+    /// never derives one: entries are coordinated by file name alone, with no
+    /// cross-process locking, so two hosts on one machine — an installed agent
+    /// and the tray app, say — must each own a separate directory or they will
+    /// race over each other's entries.
+    /// </summary>
     public OfflineQueue(string directory, int capacity = DefaultCapacity)
     {
         _directory = directory;

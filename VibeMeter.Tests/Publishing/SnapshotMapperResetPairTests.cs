@@ -1,5 +1,5 @@
 using System.Text.Json;
-using VibeMeter.Agent.Publishing;
+using VibeMeter.Publishing;
 using VibeMeter.Core;
 using VibeMeter.Providers.Claude;
 using VibeMeter.Providers.Codex;

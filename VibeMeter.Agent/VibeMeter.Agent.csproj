@@ -9,14 +9,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\VibeMeter.Core\VibeMeter.Core.csproj" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <!-- Device-code authentication for the headless agent. The token cache must use
-         MSAL's unprotected-file store on Linux: the default cross-platform cache wants
-         libsecret/a keyring, which a headless box does not have. -->
-    <PackageReference Include="Microsoft.Identity.Client" Version="4.79.0" />
-    <PackageReference Include="Microsoft.Identity.Client.Extensions.Msal" Version="4.79.0" />
+    <!-- Freshness, mapping, publishing, the offline queue and the token
+         providers: everything the tray app will share with this daemon. -->
+    <ProjectReference Include="..\VibeMeter.Publishing\VibeMeter.Publishing.csproj" />
   </ItemGroup>
 
   <ItemGroup>

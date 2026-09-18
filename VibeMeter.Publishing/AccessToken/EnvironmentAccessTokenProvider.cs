@@ -1,4 +1,4 @@
-namespace VibeMeter.Agent.AccessToken;
+namespace VibeMeter.Publishing.AccessToken;
 
 /// <summary>
 /// Reads the bearer token from the <see cref="VariableName"/> environment

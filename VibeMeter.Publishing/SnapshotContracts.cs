@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace VibeMeter.Agent.Publishing;
+namespace VibeMeter.Publishing;
 
 /// <summary>
 /// Local mirror of the collection API's snapshot request contract

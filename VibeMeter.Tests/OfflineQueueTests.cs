@@ -1,4 +1,4 @@
-using VibeMeter.Agent;
+using VibeMeter.Publishing;
 using Xunit;
 
 namespace VibeMeter.Tests;

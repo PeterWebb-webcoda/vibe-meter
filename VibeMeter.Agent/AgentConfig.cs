@@ -51,7 +51,8 @@ public sealed record AgentConfig(Uri? ApiBaseUrl, TimeSpan Interval, string Queu
     /// <summary>
     /// Reads and validates configuration, aggregating every problem into one
     /// exception. The token is checked for presence only — it is never copied
-    /// into the config or logged; <see cref="AccessToken.EnvironmentAccessTokenProvider"/>
+    /// into the config or logged;
+    /// <see cref="VibeMeter.Publishing.AccessToken.EnvironmentAccessTokenProvider"/>
     /// reads it fresh for every publish.
     /// </summary>
     /// <param name="requireApiBaseUrl">
@@ -136,6 +137,13 @@ public sealed record AgentConfig(Uri? ApiBaseUrl, TimeSpan Interval, string Queu
         return new AgentConfig(apiBaseUrl!, interval, DefaultQueueDirectory(), stalenessThreshold);
     }
 
+    /// <summary>
+    /// THIS HOST's offline queue. The publishing library never derives a queue
+    /// directory: entries are coordinated by file name alone, with no
+    /// cross-process locking, so the agent and any second host (the tray app)
+    /// must each name their own directory - hence the assembly name in the
+    /// path - rather than share one and race over each other's entries.
+    /// </summary>
     private static string DefaultQueueDirectory() =>
         // SpecialFolder.ApplicationData maps to %APPDATA% on Windows (roaming)
         // and to $XDG_DATA_HOME or ~/.local/share on Linux - both durable and

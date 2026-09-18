@@ -1,9 +1,9 @@
 using System.Net.Http.Headers;
 using System.Security.Cryptography;
 using System.Text;
-using VibeMeter.Agent.AccessToken;
+using VibeMeter.Publishing.AccessToken;
 
-namespace VibeMeter.Agent.Publishing;
+namespace VibeMeter.Publishing;
 
 /// <summary>Terminal result of one publish (retries already exhausted internally).</summary>
 public enum PublishOutcome
@@ -20,7 +20,7 @@ public enum PublishOutcome
     /// document is worthless: the API on the other end can change under us (a
     /// rollback leaves an older validator rejecting a newer payload), so the
     /// caller retains the snapshot for a bounded number of later attempts
-    /// rather than destroying it. See <see cref="AgentHost.FlushQueueAsync"/>.
+    /// rather than destroying it. See <see cref="SnapshotPublishCycle.FlushQueueAsync"/>.
     /// </summary>
     PermanentFailure,
 

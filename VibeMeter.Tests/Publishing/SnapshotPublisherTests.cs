@@ -5,8 +5,8 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Sockets;
 using System.Text;
-using VibeMeter.Agent.AccessToken;
-using VibeMeter.Agent.Publishing;
+using VibeMeter.Publishing.AccessToken;
+using VibeMeter.Publishing;
 using Xunit;
 
 namespace VibeMeter.Tests.Publishing;

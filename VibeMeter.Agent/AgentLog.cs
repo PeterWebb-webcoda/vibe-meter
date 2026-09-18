@@ -1,4 +1,5 @@
 using System.Globalization;
+using VibeMeter.Publishing;
 
 namespace VibeMeter.Agent;
 
@@ -30,4 +31,25 @@ internal static class AgentLog
             writer.WriteLine(message);
         }
     }
+}
+
+/// <summary>
+/// Hands <see cref="AgentLog"/> to the publishing library through its neutral
+/// <see cref="IPublishLog"/> seam. The console writer stays here, in the
+/// headless host that owns a console; the library says what happened and this
+/// decides where it goes.
+/// </summary>
+internal sealed class AgentPublishLog : IPublishLog
+{
+    public static readonly AgentPublishLog Instance = new();
+
+    private AgentPublishLog()
+    {
+    }
+
+    public void Info(string message) => AgentLog.Info(message);
+
+    public void Warn(string message) => AgentLog.Warn(message);
+
+    public void Error(string message) => AgentLog.Error(message);
 }

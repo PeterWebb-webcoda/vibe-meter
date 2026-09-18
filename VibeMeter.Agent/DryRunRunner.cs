@@ -1,6 +1,6 @@
 using System.Text.Json;
-using VibeMeter.Agent.Publishing;
 using VibeMeter.Core;
+using VibeMeter.Publishing;
 
 namespace VibeMeter.Agent;
 
@@ -18,9 +18,10 @@ public sealed class NeverPublishPublisher : ISnapshotPublisher
 
 /// <summary>
 /// Implements <c>--dry-run</c>: one pass through the same
-/// <see cref="SnapshotPipeline"/> the daemon uses, then a human-readable
-/// report. Nothing is published, the offline queue is never touched (the
-/// pipeline cannot reach either), and no access token is read — a dry-run
+/// <see cref="ProviderCollector"/> and <see cref="SnapshotComposer"/> the
+/// daemon uses, then a human-readable report. Nothing is published, the
+/// offline queue is never touched (neither of those can reach it — this path
+/// never builds one), and no access token is read — a dry-run
 /// works on a machine with no authentication configured at all, which is the
 /// point: verifying collection before auth exists.
 /// </summary>
@@ -78,8 +79,13 @@ public sealed class DryRunRunner
             $"VibeMeter agent dry-run - collecting from {_providers.Count} provider(s); " +
             "nothing will be published and no token is required.");
 
-        var pipeline = new SnapshotPipeline(_providers, _mapper, _config.StalenessThreshold);
-        var collected = await pipeline.CollectGateMapAsync(cancellationToken);
+        // Built before collecting, as the daemon host builds its own: the gate
+        // validates the staleness threshold in its constructor, and a bad one
+        // should fail the run before four providers are fetched for nothing.
+        var composer = new SnapshotComposer(_mapper, _config.StalenessThreshold, AgentPublishLog.Instance);
+
+        var usages = await new ProviderCollector(_providers).CollectAsync(cancellationToken);
+        var collected = usages is null ? null : composer.Compose(usages);
         if (collected is null)
         {
             await Output.WriteLineAsync("DRY-RUN FAILED - collection failed, so no snapshot could be produced at all.");

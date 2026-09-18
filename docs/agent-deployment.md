@@ -86,8 +86,9 @@ If it shows `root:root`, somebody ran `--login` as root — see §6.1.
 ### Status: implemented, unverified end to end
 
 Both token providers, the `--login` mode, the cache plumbing and the daemon's
-no-prompt behaviour exist in the source (`VibeMeter.Agent/AccessToken/`,
-`Program.cs`, `CliOptions.cs`; `--help` lists the variables). What has never
+no-prompt behaviour exist in the source (`VibeMeter.Publishing/AccessToken/`
+for the providers, `VibeMeter.Agent/AccessToken/` for the environment they are
+configured from, `Program.cs`, `CliOptions.cs`; `--help` lists the variables). What has never
 happened is an actual device-code sign-in against the identity provider: the
 flow is **unverified end to end**, and the first `--login` on each machine is
 its real test. Note also that the client, tenant and scope identifiers are
@@ -305,8 +306,8 @@ seen.
 ## 4. Environment variable reference
 
 Every variable the agent reads, from `AgentConfig.cs` (the token constant
-also appears in `AccessToken\EnvironmentAccessTokenProvider.cs`; the
-device-code trio in `AccessToken\DeviceCodeAuthOptions.cs`). `--help` prints
+also appears in `VibeMeter.Publishing\AccessToken\EnvironmentAccessTokenProvider.cs`;
+the device-code trio in `VibeMeter.Agent\AccessToken\DeviceCodeAuthEnvironment.cs`). `--help` prints
 the same list. Variables are validated at startup; each validator aggregates
 its own problems into **one** message on stderr — `The VibeMeter agent is not
 configured correctly:` (base URL, token, interval, staleness) or `Device-code

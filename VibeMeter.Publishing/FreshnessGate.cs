@@ -1,6 +1,6 @@
 using VibeMeter.Core;
 
-namespace VibeMeter.Agent.Publishing;
+namespace VibeMeter.Publishing;
 
 /// <summary>
 /// The outcome of one freshness pass: the reports worth publishing, one line of

@@ -1,5 +1,6 @@
 using VibeMeter.Agent;
 using VibeMeter.Agent.AccessToken;
+using VibeMeter.Publishing.AccessToken;
 using Xunit;
 
 namespace VibeMeter.Tests;
@@ -18,9 +19,9 @@ public sealed class DeviceCodeAuthTests
 {
     private static readonly string[] AuthVariables =
     [
-        DeviceCodeAuthOptions.ClientIdVariable,
-        DeviceCodeAuthOptions.TenantIdVariable,
-        DeviceCodeAuthOptions.ScopeVariable,
+        DeviceCodeAuthEnvironment.ClientIdVariable,
+        DeviceCodeAuthEnvironment.TenantIdVariable,
+        DeviceCodeAuthEnvironment.ScopeVariable,
         AgentConfig.TokenVariable,
     ];
 
@@ -55,9 +56,9 @@ public sealed class DeviceCodeAuthTests
     public void HelpText_DocumentsLoginAndItsVariables()
     {
         Assert.Contains("--login", CliOptions.HelpText);
-        Assert.Contains(DeviceCodeAuthOptions.ClientIdVariable, CliOptions.HelpText);
-        Assert.Contains(DeviceCodeAuthOptions.TenantIdVariable, CliOptions.HelpText);
-        Assert.Contains(DeviceCodeAuthOptions.ScopeVariable, CliOptions.HelpText);
+        Assert.Contains(DeviceCodeAuthEnvironment.ClientIdVariable, CliOptions.HelpText);
+        Assert.Contains(DeviceCodeAuthEnvironment.TenantIdVariable, CliOptions.HelpText);
+        Assert.Contains(DeviceCodeAuthEnvironment.ScopeVariable, CliOptions.HelpText);
     }
 
     [Fact]
@@ -66,13 +67,13 @@ public sealed class DeviceCodeAuthTests
         WithVariables(
             new()
             {
-                [DeviceCodeAuthOptions.ClientIdVariable] = "  client-id  ",
-                [DeviceCodeAuthOptions.TenantIdVariable] = "tenant-id",
-                [DeviceCodeAuthOptions.ScopeVariable] = "api://resource/Usage.Write",
+                [DeviceCodeAuthEnvironment.ClientIdVariable] = "  client-id  ",
+                [DeviceCodeAuthEnvironment.TenantIdVariable] = "tenant-id",
+                [DeviceCodeAuthEnvironment.ScopeVariable] = "api://resource/Usage.Write",
             },
             () =>
             {
-                var options = DeviceCodeAuthOptions.FromEnvironment();
+                var options = DeviceCodeAuthEnvironment.FromEnvironment();
 
                 Assert.Equal("client-id", options.ClientId);
                 Assert.Equal("tenant-id", options.TenantId);
@@ -88,11 +89,11 @@ public sealed class DeviceCodeAuthTests
         // one run, not discover them one restart at a time.
         WithVariables([], () =>
         {
-            var exception = Assert.Throws<AgentConfigException>(DeviceCodeAuthOptions.FromEnvironment);
+            var exception = Assert.Throws<AgentConfigException>(DeviceCodeAuthEnvironment.FromEnvironment);
 
-            Assert.Contains(DeviceCodeAuthOptions.ClientIdVariable, exception.Message);
-            Assert.Contains(DeviceCodeAuthOptions.TenantIdVariable, exception.Message);
-            Assert.Contains(DeviceCodeAuthOptions.ScopeVariable, exception.Message);
+            Assert.Contains(DeviceCodeAuthEnvironment.ClientIdVariable, exception.Message);
+            Assert.Contains(DeviceCodeAuthEnvironment.TenantIdVariable, exception.Message);
+            Assert.Contains(DeviceCodeAuthEnvironment.ScopeVariable, exception.Message);
         });
     }
 
@@ -104,14 +105,14 @@ public sealed class DeviceCodeAuthTests
         WithVariables(
             new()
             {
-                [DeviceCodeAuthOptions.ClientIdVariable] = "client-id",
-                [DeviceCodeAuthOptions.TenantIdVariable] = blank,
-                [DeviceCodeAuthOptions.ScopeVariable] = "api://resource/Usage.Write",
+                [DeviceCodeAuthEnvironment.ClientIdVariable] = "client-id",
+                [DeviceCodeAuthEnvironment.TenantIdVariable] = blank,
+                [DeviceCodeAuthEnvironment.ScopeVariable] = "api://resource/Usage.Write",
             },
             () =>
             {
-                var exception = Assert.Throws<AgentConfigException>(DeviceCodeAuthOptions.FromEnvironment);
-                Assert.Contains(DeviceCodeAuthOptions.TenantIdVariable, exception.Message);
+                var exception = Assert.Throws<AgentConfigException>(DeviceCodeAuthEnvironment.FromEnvironment);
+                Assert.Contains(DeviceCodeAuthEnvironment.TenantIdVariable, exception.Message);
             });
     }
 
@@ -128,9 +129,9 @@ public sealed class DeviceCodeAuthTests
         WithVariables(
             new()
             {
-                [DeviceCodeAuthOptions.ClientIdVariable] = "client-id",
-                [DeviceCodeAuthOptions.TenantIdVariable] = "tenant-id",
-                [DeviceCodeAuthOptions.ScopeVariable] = "api://resource/Usage.Write",
+                [DeviceCodeAuthEnvironment.ClientIdVariable] = "client-id",
+                [DeviceCodeAuthEnvironment.TenantIdVariable] = "tenant-id",
+                [DeviceCodeAuthEnvironment.ScopeVariable] = "api://resource/Usage.Write",
             },
             () => Assert.IsType<DeviceCodeAccessTokenProvider>(Program.CreateAccessTokenProvider()));
     }
@@ -143,13 +144,13 @@ public sealed class DeviceCodeAuthTests
         WithVariables(
             new()
             {
-                [DeviceCodeAuthOptions.ClientIdVariable] = "client-id",
+                [DeviceCodeAuthEnvironment.ClientIdVariable] = "client-id",
                 [AgentConfig.TokenVariable] = "a-token",
             },
             () =>
             {
                 var exception = Assert.Throws<AgentConfigException>(Program.CreateAccessTokenProvider);
-                Assert.Contains(DeviceCodeAuthOptions.TenantIdVariable, exception.Message);
+                Assert.Contains(DeviceCodeAuthEnvironment.TenantIdVariable, exception.Message);
             });
     }
 

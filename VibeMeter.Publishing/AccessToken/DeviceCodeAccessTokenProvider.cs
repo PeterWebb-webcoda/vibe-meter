@@ -1,16 +1,16 @@
 using Microsoft.Identity.Client;
 using Microsoft.Identity.Client.Extensions.Msal;
 
-namespace VibeMeter.Agent.AccessToken;
+namespace VibeMeter.Publishing.AccessToken;
 
 /// <summary>
 /// Acquires the collection API token from Microsoft Entra using the OAuth 2.0
 /// device authorisation flow, which needs no browser or redirect listener on the
-/// machine running the agent.
+/// machine running the host.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Interactive sign-in is opt-in. The daemon constructs this with
+/// Interactive sign-in is opt-in. A daemon constructs this with
 /// <c>allowInteractive: false</c> so it can only ever refresh a token that an
 /// operator has already established; if that is not possible it fails with an
 /// instruction rather than printing a code nobody is watching and blocking
@@ -21,12 +21,20 @@ namespace VibeMeter.Agent.AccessToken;
 /// unprotected file on Linux. That is deliberate: the default Linux cache needs
 /// libsecret and a running keyring, neither of which a headless server has, and
 /// the failure is an obscure one at first refresh. The file is created under the
-/// per-user application data directory; on a shared host it should be treated as
+/// per-user application data directory; on a shared machine it should be treated as
 /// a credential and its permissions restricted accordingly.
 /// </para>
 /// </remarks>
 public sealed class DeviceCodeAccessTokenProvider : IAccessTokenProvider
 {
+    /// <summary>
+    /// The macOS keychain service the token cache is filed under. Neutral on
+    /// purpose: this library is shared by the headless agent and the desktop
+    /// app, so naming one of them here would file the other's credential under
+    /// a service it has no business claiming.
+    /// </summary>
+    private const string MacKeyChainService = "VibeMeter";
+
     private readonly DeviceCodeAuthOptions _options;
     private readonly bool _allowInteractive;
     private readonly Action<string> _notify;
@@ -118,7 +126,7 @@ public sealed class DeviceCodeAccessTokenProvider : IAccessTokenProvider
                     DeviceCodeAuthOptions.CacheFileName,
                     _options.CacheDirectory)
                 .WithLinuxUnprotectedFile()
-                .WithMacKeyChain("VibeMeter.Agent", "MsalCache")
+                .WithMacKeyChain(MacKeyChainService, "MsalCache")
                 .Build();
 
             var cache = await MsalCacheHelper.CreateAsync(storage).ConfigureAwait(false);

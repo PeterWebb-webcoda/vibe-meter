@@ -1,8 +1,9 @@
 using System.Runtime.InteropServices;
 using VibeMeter.Agent;
 using VibeMeter.Agent.AccessToken;
-using VibeMeter.Agent.Publishing;
 using VibeMeter.Core;
+using VibeMeter.Publishing;
+using VibeMeter.Publishing.AccessToken;
 using VibeMeter.Providers.Claude;
 using VibeMeter.Providers.Codex;
 using VibeMeter.Providers.Google;
@@ -62,7 +63,7 @@ internal static class Program
         DeviceCodeAuthOptions options;
         try
         {
-            options = DeviceCodeAuthOptions.FromEnvironment();
+            options = DeviceCodeAuthEnvironment.FromEnvironment();
         }
         catch (AgentConfigException ex)
         {
@@ -101,14 +102,14 @@ internal static class Program
     /// </summary>
     internal static IAccessTokenProvider CreateAccessTokenProvider()
     {
-        var clientId = Environment.GetEnvironmentVariable(DeviceCodeAuthOptions.ClientIdVariable);
+        var clientId = Environment.GetEnvironmentVariable(DeviceCodeAuthEnvironment.ClientIdVariable);
         if (string.IsNullOrWhiteSpace(clientId))
         {
             return new EnvironmentAccessTokenProvider();
         }
 
         return new DeviceCodeAccessTokenProvider(
-            DeviceCodeAuthOptions.FromEnvironment(),
+            DeviceCodeAuthEnvironment.FromEnvironment(),
             allowInteractive: false);
     }
 
@@ -119,7 +120,7 @@ internal static class Program
         // from the cached credential, so VIBEMETER_AGENT_TOKEN is not required -
         // demanding it would make a correctly configured machine refuse to start.
         var usingDeviceCode = !string.IsNullOrWhiteSpace(
-            Environment.GetEnvironmentVariable(DeviceCodeAuthOptions.ClientIdVariable));
+            Environment.GetEnvironmentVariable(DeviceCodeAuthEnvironment.ClientIdVariable));
 
         AgentConfig config;
         try
