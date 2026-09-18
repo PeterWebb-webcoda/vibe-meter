@@ -9,8 +9,8 @@ using Xunit;
 namespace VibeMeter.Tests.Publishing;
 
 /// <summary>
-/// Locks the reset-pair emission rules the collection API enforces
-/// (Webcoda-App: Features/AiUsage/AiUsageRequestValidator): resetAt and
+/// Locks the reset-pair emission rules the collection API enforces: resetAt
+/// and
 /// resetWindowSeconds travel only as a pair; the window must be 60 s..366 d;
 /// resetAt must be UTC with a zero offset within observedAt − 1 day ..
 /// observedAt + 366 days. Any failure omits BOTH fields — never a clamped or

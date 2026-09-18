@@ -7,8 +7,7 @@ using Xunit;
 namespace VibeMeter.Tests.Publishing;
 
 /// <summary>
-/// Locks the wire contract the collection API enforces
-/// (Webcoda-App: Features/AiUsage/AiUsageRequestValidator). The API rejects a
+/// Locks the wire contract the collection API enforces. The API rejects a
 /// wrong shape with a silent 400 on every publish cycle, so these tests assert
 /// the serialised JSON, not just the mapped objects.
 /// </summary>

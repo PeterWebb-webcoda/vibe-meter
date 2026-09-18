@@ -4,8 +4,8 @@ using System.Text.Json.Serialization;
 namespace VibeMeter.Publishing;
 
 /// <summary>
-/// Local mirror of the collection API's snapshot request contract
-/// (Webcoda-App: Features/AiUsage/AiUsageContracts.cs). The API sets
+/// Local mirror of the collection API's snapshot request contract. The API
+/// sets
 /// <c>JsonUnmappedMemberHandling.Disallow</c>, so these records must carry
 /// EXACTLY the documented fields and nothing else. Never serialise a VibeMeter
 /// model directly — <see cref="ProviderUsage"/> has many more members and the

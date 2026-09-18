@@ -77,8 +77,8 @@ Plan / identity metadata comes from the `oauthAccount` block in
 ```jsonc
 {
   "oauthAccount": {
-    "emailAddress": "peter@webcoda.com.au",
-    "organizationName": "Webcoda",
+    "emailAddress": "user@example.com",
+    "organizationName": "Example Org",
     "organizationType": "claude_team",
     "userRateLimitTier": "default_claude_max_5x"   // -> friendly "Claude Max 5x"
   }
