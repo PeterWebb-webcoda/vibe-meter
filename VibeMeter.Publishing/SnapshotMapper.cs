@@ -7,7 +7,7 @@ namespace VibeMeter.Publishing;
 /// <summary>
 /// Maps VibeMeter <see cref="ProviderUsage"/> reports onto the collection API's
 /// snapshot contract. The authoritative rules live in the API's
-/// AiUsageRequestValidator (1..16 providers, 0..16 gauges, the fixed state
+/// the API's request validator (1..16 providers, 0..16 gauges, the fixed state
 /// vocabulary, identifier pattern, paired reset fields) — this class mirrors
 /// them so the agent never sends a request the server would reject.
 /// Deterministic by design: identical inputs produce a byte-identical document,
@@ -15,11 +15,11 @@ namespace VibeMeter.Publishing;
 /// </summary>
 public sealed partial class SnapshotMapper
 {
-    // Mirrors AiUsageRequestValidator.MaximumProviderCount / MaximumGaugeCount.
+    // Mirrors the API's provider and gauge count ceilings.
     public const int MaxProviders = 16;
     public const int MaxGauges = 16;
 
-    // Mirrors AiUsageRequestValidator's reset rules: resetWindowSeconds must be
+    // Mirrors the API's reset rules: resetWindowSeconds must be
     // between 60 seconds and 366 days, and resetAt must fall within
     // observedAt − 1 day .. observedAt + 366 days.
     public const int MinResetWindowSeconds = 60;

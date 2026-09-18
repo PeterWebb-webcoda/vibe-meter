@@ -1,4 +1,4 @@
-# VibeMeter.Agent systemd unit (Gladux / Linux).
+# VibeMeter.Agent systemd unit (Linux, dedicated service account).
 #
 # Install with:
 #   sudo cp deploy/vibemeter-agent.service /etc/systemd/system/

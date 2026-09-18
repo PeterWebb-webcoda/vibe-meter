@@ -1,9 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!--
-  VibeMeter.Agent scheduled task for Windows ("Rock").
+  VibeMeter.Agent scheduled task for Windows.
 
   BEFORE IMPORTING, edit:
-    - Principals/Principal/UserId  -> ROCK\<task-account>
+    - Principals/Principal/UserId  -> <MACHINE>\<task-account>
     - Actions/Exec/Arguments       -> if the install path differs
 
   Import (prompts for the account's password — it never touches the command line):
@@ -37,7 +37,7 @@
   </Triggers>
   <Principals>
     <Principal id="Author">
-      <UserId>ROCK\vibemeter-agent</UserId>
+      <UserId><MACHINE>\vibemeter-agent</UserId>
       <LogonType>Password</LogonType>
       <RunLevel>LeastPrivilege</RunLevel>
     </Principal>

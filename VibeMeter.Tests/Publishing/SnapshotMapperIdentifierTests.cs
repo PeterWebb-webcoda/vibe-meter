@@ -76,7 +76,7 @@ public sealed class SnapshotMapperIdentifierTests
     }
 
     // The API rejects any id longer than 64 characters
-    // (AiUsageRequestValidator.IsValidIdentifier), so the duplicate-id suffix
+    // (the API's identifier rule), so the duplicate-id suffix
     // must never push an id past that limit.
     [Fact]
     public void DuplicateGaugeIdSuffixing_NeverExceedsTheApiIdentifierLimit()

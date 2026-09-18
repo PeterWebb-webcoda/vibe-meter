@@ -60,7 +60,7 @@ public sealed class IdempotencyKeyTests
     [Fact]
     public void Key_SatisfiesTheApiHeaderContract()
     {
-        // Mirrors AiUsageRequestValidator.MaximumIdempotencyKeyLength.
+        // Mirrors the API's maximum idempotency-key length.
         const int maximumKeyLength = 128;
 
         var key = IdempotencyKey.For(Map().Json);

@@ -3,8 +3,8 @@
 Running the headless agent unattended on the two machines that report into the
 collection API:
 
-- **Rock** — Windows 11 workstation (Scheduled Task)
-- **Gladux** — headless Linux box (systemd)
+- **the Windows workstation** — Windows 11 workstation (Scheduled Task)
+- **the Linux box** — headless Linux box (systemd)
 
 The agent must start at boot without anyone logged on, survive reboots, and be
 diagnosable over a remote session. What the agent *does* — configuration
@@ -66,8 +66,8 @@ the running user's per-user application-data directory plus `VibeMeter`:
 
 | Machine | Path (for the account running the agent) | Protection |
 |---|---|---|
-| Rock (Windows) | `%APPDATA%\VibeMeter\agent-token-cache.bin` → e.g. `C:\Users\vibemeter-agent\AppData\Roaming\VibeMeter\agent-token-cache.bin` | MSAL's encrypted store |
-| Gladux (Linux) | `$XDG_CONFIG_HOME` if set, else `$HOME/.config`, plus `VibeMeter\agent-token-cache.bin` — as installed (the unit pins `HOME=/opt/vibemeter`): `/opt/vibemeter/.config/VibeMeter/agent-token-cache.bin` | **none — an unprotected file** |
+| Windows | `%APPDATA%\VibeMeter\agent-token-cache.bin` → e.g. `C:\Users\vibemeter-agent\AppData\Roaming\VibeMeter\agent-token-cache.bin` | MSAL's encrypted store |
+| Linux | `$XDG_CONFIG_HOME` if set, else `$HOME/.config`, plus `VibeMeter\agent-token-cache.bin` — as installed (the unit pins `HOME=/opt/vibemeter`): `/opt/vibemeter/.config/VibeMeter/agent-token-cache.bin` | **none — an unprotected file** |
 | macOS (not a deployment target) | MSAL keychain storage | keychain |
 
 The unprotected Linux file is deliberate: MSAL's default Linux cache needs
@@ -119,14 +119,43 @@ variant — the agent is pure managed code with no native dependencies.
 | Needs .NET 10 runtime on target | yes (`dotnet --list-runtimes` should show `Microsoft.NETCore.App 10.x`) | no |
 | Tracks runtime patches/updates on the target | yes | no — frozen at publish time |
 
-Either is fine. If Gladux will not get runtime updates while you are away, ship
+Either is fine. If the Linux box will not get runtime updates while you are away, ship
 the self-contained build so a missing or upgraded runtime cannot break it.
 
 The FDD and SC builds both produce a launcher executable — `VibeMeter.Agent.exe`
 on Windows, `VibeMeter.Agent` on Linux — next to `VibeMeter.Agent.dll`.
 (Launching the `.dll` directly with `dotnet VibeMeter.Agent.dll` works too.)
 
-## 2. Gladux (Linux) — systemd
+## 2. Linux — systemd
+
+### Choose the unit first: personal machine or shared host
+
+There are two units in `deploy/`, and picking the wrong one wastes an install.
+
+| | `vibemeter-agent-user.service` | `vibemeter-agent.service` |
+|---|---|---|
+| Runs as | you, via `systemd --user` | a dedicated `vibemeter` service account |
+| Installs to | `~/vibemeter`, env at `~/.config/vibemeter/agent.env` | `/opt/vibemeter`, env at `/etc/vibemeter/agent.env` |
+| Enable with | `systemctl --user enable --now` + `loginctl enable-linger $USER` | `sudo systemctl enable --now` |
+| Sees your provider credentials | **yes**, directly | no — they must be copied in |
+| Use it for | a personal workstation or dev box | a shared or unattended host |
+
+**On a personal machine, use the user unit.** The providers read credentials
+the AI tools wrote into the signed-in user's own home — `~/.claude`,
+`~/.codex`, `~/.zcode`. A service account has its own empty home, so every
+provider reports `not-configured` while the service looks perfectly healthy.
+That failure is silent, which is what makes it worth choosing deliberately.
+
+The rest of §2 documents the **service-account** shape. For the user unit the
+sequence is the same minus the `useradd` and the `sudo`: publish into
+`~/vibemeter`, copy `deploy/vibemeter-agent.env.example` to
+`~/.config/vibemeter/agent.env` (mode 600), copy
+`deploy/vibemeter-agent-user.service` to
+`~/.config/systemd/user/vibemeter-agent.service`, run `--login` as yourself,
+then `systemctl --user daemon-reload && systemctl --user enable --now
+vibemeter-agent` and `loginctl enable-linger $USER` so it survives logout.
+
+### Service-account install (shared host)
 
 `deploy/vibemeter-agent.service` and `deploy/vibemeter-agent.env.example` are
 the two supporting files. The unit runs the agent as a **non-root** user,
@@ -166,7 +195,7 @@ sudo systemctl enable --now vibemeter-agent
 systemctl status vibemeter-agent
 ```
 
-### 2.1 Signing in on Gladux (`--login`)
+### 2.1 Signing in on Linux (`--login`)
 
 Run `--login` **as the `vibemeter` user**, with the same environment the
 service will see. A credential cached into root's or your own account's
@@ -196,19 +225,19 @@ journalctl -u vibemeter-agent -o cat          # raw lines (they are already UTC-
 journalctl -u vibemeter-agent | grep '\[error\]'   # errors only
 ```
 
-### Provider credentials on Gladux
+### Provider credentials under the service account
 
 Providers look for their local credentials under the **running user's profile**
 (e.g. Codex `~/.codex/auth.json`, Claude `~/.claude` — honouring
 `CLAUDE_CONFIG_DIR` — and Z.ai keys from environment variables or
 `~/.zcode/config.json`). Under the unit, that profile is `/opt/vibemeter`. Copy
-or symlink the credential directories you want Gladux to report on into
+or symlink the credential directories you want the Linux box to report on into
 `/opt/vibemeter`, and add any provider key environment variables to
 `/etc/vibemeter/agent.env`. A provider with no credentials reports
 `not-configured` — see the warning in [§7](#7-a-warning-about-not-configured)
 before deciding that is acceptable.
 
-## 3. Rock (Windows) — Scheduled Task
+## 3. Windows — Scheduled Task
 
 The recommended unattended option is a **Scheduled Task with a boot trigger,
 running whether or not the user is logged on**. (Not a Windows service: the
@@ -234,7 +263,7 @@ Copy-Item publish\agent-win-x64\* "C:\Program Files\VibeMeter\Agent\"   # or the
 
 # 2. Log file directory (the cmd.exe wrapper appends here).
 New-Item -ItemType Directory -Force "C:\ProgramData\VibeMeter\Agent"
-icacls "C:\ProgramData\VibeMeter\Agent" /grant "ROCK\vibemeter-agent:(OI)(CI)M"
+icacls "C:\ProgramData\VibeMeter\Agent" /grant "<MACHINE>\vibemeter-agent:(OI)(CI)M"
 
 # 3. Edit deploy\vibemeter-agent-task.xml: set UserId to the task account and
 #    fix the install path if it differs. Then import — it prompts for the
@@ -251,7 +280,7 @@ schtasks /Query /TN "VibeMeter Agent" /V /FO LIST
 A minimal one-liner also works if you accept the default settings:
 
 ```powershell
-schtasks /Create /F /TN "VibeMeter Agent" /SC ONSTART /TR "\"C:\Program Files\VibeMeter\Agent\VibeMeter.Agent.exe\"" /RU ROCK\vibemeter-agent /RP <password>
+schtasks /Create /F /TN "VibeMeter Agent" /SC ONSTART /TR "\"C:\Program Files\VibeMeter\Agent\VibeMeter.Agent.exe\"" /RU <MACHINE>\vibemeter-agent /RP <password>
 ```
 
 … but it carries the 72-hour execution limit, no restart-on-failure, and no
@@ -259,7 +288,7 @@ log capture. Prefer the XML.
 
 ### Task account, and how the task sees environment variables
 
-Use a **dedicated local account** (e.g. `ROCK\vibemeter-agent`) rather than
+Use a **dedicated local account** (e.g. `<MACHINE>\vibemeter-agent`) rather than
 `SYSTEM`: providers read credentials from the running user's profile
 (`%USERPROFILE%\.codex`, `%USERPROFILE%\.claude`, `%USERPROFILE%\.zcode`), and
 under `SYSTEM` all four providers report `not-configured` — see
@@ -283,14 +312,14 @@ change is only picked up by processes **started afterwards** — stop and restar
 the task (`schtasks /End` then `schtasks /Run /TN "VibeMeter Agent"`) to
 re-read them.
 
-### 3.1 Signing in on Rock (`--login`)
+### 3.1 Signing in on Windows (`--login`)
 
 Run `--login` **as the task account**, not as yourself — the cache is
 per-user, and a credential cached into your own `%APPDATA%` is invisible to
 the task. From an interactive console:
 
 ```powershell
-runas /user:ROCK\vibemeter-agent "C:\Program Files\VibeMeter\Agent\VibeMeter.Agent.exe --login"
+runas /user:<MACHINE>\vibemeter-agent "C:\Program Files\VibeMeter\Agent\VibeMeter.Agent.exe --login"
 ```
 
 `runas` prompts for the task account's password and opens a new console
@@ -366,8 +395,8 @@ mapped snapshot (ids, states, percentages) — never credentials.
 
 | OS | Path (for the account running the agent) |
 |---|---|
-| Linux (Gladux, as installed) | `/opt/vibemeter/.config/VibeMeter/VibeMeter.Agent/offline-queue` (`$XDG_CONFIG_HOME` if set, else `$HOME/.config` — .NET maps `SpecialFolder.ApplicationData` there on Linux; the unit pins `HOME=/opt/vibemeter`) |
-| Windows (Rock) | `%APPDATA%\VibeMeter\VibeMeter.Agent\offline-queue` → e.g. `C:\Users\vibemeter-agent\AppData\Roaming\VibeMeter\VibeMeter.Agent\offline-queue` |
+| Linux (the Linux box, as installed) | `/opt/vibemeter/.config/VibeMeter/VibeMeter.Agent/offline-queue` (`$XDG_CONFIG_HOME` if set, else `$HOME/.config` — .NET maps `SpecialFolder.ApplicationData` there on Linux; the unit pins `HOME=/opt/vibemeter`) |
+| Windows (the Windows workstation) | `%APPDATA%\VibeMeter\VibeMeter.Agent\offline-queue` → e.g. `C:\Users\vibemeter-agent\AppData\Roaming\VibeMeter\VibeMeter.Agent\offline-queue` |
 
 The queue is normally empty (each publish deletes its entry). A **growing**
 count — visible as `Snapshot queued for later upload (N pending)` lines with
@@ -375,7 +404,7 @@ increasing N — is the reliable "failing to publish" signal.
 
 ### "Not running" vs "running but failing to publish"
 
-| Question | Gladux | Rock |
+| Question | the Linux box | the Windows workstation |
 |---|---|---|
 | Is the process alive? | `systemctl is-active vibemeter-agent` | `Get-Process VibeMeter.Agent`; task shows State `Running` / LastTaskResult `0x41301` |
 | When did it last publish? | `journalctl -u vibemeter-agent -o cat \| grep -F 'Published snapshot' \| tail -1` | `Select-String -Path "C:\ProgramData\VibeMeter\Agent\agent.log" -Pattern 'Published snapshot' \| Select-Object -Last 1` |
@@ -408,7 +437,7 @@ Which mode is in play is decided by `VIBEMETER_AGENT_CLIENT_ID`
 - **Rotation mechanics**: the provider re-reads the variable on every publish,
   but a process's environment is fixed at start — so rotation is: update
   `/etc/vibemeter/agent.env` + `sudo systemctl restart vibemeter-agent`
-  (Gladux), or re-run `setx` + `schtasks /End` and `/Run` (Rock).
+  (the Linux box), or re-run `setx` + `schtasks /End` and `/Run` (the Windows workstation).
 
 **Device-code mode** (`VIBEMETER_AGENT_CLIENT_ID` set):
 
@@ -426,7 +455,7 @@ Which mode is in play is decided by `VIBEMETER_AGENT_CLIENT_ID`
   mode.) The snapshot is queued each cycle, so nothing is lost, and the
   process stays up — this is the "running but failing to publish" signature
   of §5, not a restart loop.
-- **Telling the three causes apart** (Gladux):
+- **Telling the three causes apart** (the Linux box):
   `sudo ls -l /opt/vibemeter/.config/VibeMeter/agent-token-cache.bin`.
   *File missing* → never signed in as the service user. *File present but
   owned by someone else* (typically `root:root`) → `--login` was run as the
@@ -446,7 +475,7 @@ Which mode is in play is decided by `VIBEMETER_AGENT_CLIENT_ID`
   Under systemd this is a restart loop per §4. All three variables are
   reported together when several are missing.
 - **Signed in as the wrong user** deserves its own warning: `--login` run as
-  root (Gladux) or as your own account (Rock) writes the cache into *that*
+  root (the Linux box) or as your own account (the Windows workstation) writes the cache into *that*
   account's profile, and the daemon — running as the service account — sees
   none of it. It is the most likely reason a sign-in that worked at a desk
   fails once deployed: always run `--login` as the account the service runs
@@ -517,7 +546,7 @@ its own once the clock is fixed; the line repeats every cycle until then. Note
 the asymmetry: a future-skewed
 timestamp is treated as *fresh* by the staleness gate (negative age), so skew
 never causes omission — it surfaces only as the 400 above. Fix:
-`w32tm /resync` (Rock, elevated) or `timedatectl set-ntp true` (Gladux), then
+`w32tm /resync` (the Windows workstation, elevated) or `timedatectl set-ntp true` (the Linux box), then
 confirm with `w32tm /query /status` / `timedatectl`.
 
 ### 7. A warning about `not-configured`
@@ -537,6 +566,6 @@ agent on that machine.
 
 | File | Target | Purpose |
 |---|---|---|
-| `vibemeter-agent.service` | Gladux | systemd unit (non-root, `Restart=always`, journald) |
-| `vibemeter-agent.env.example` | Gladux | template for `/etc/vibemeter/agent.env` (mode 600) |
-| `vibemeter-agent-task.xml` | Rock | Scheduled Task definition (boot trigger, no time limit, log capture) |
+| `vibemeter-agent.service` | the Linux box | systemd unit (non-root, `Restart=always`, journald) |
+| `vibemeter-agent.env.example` | the Linux box | template for `/etc/vibemeter/agent.env` (mode 600) |
+| `vibemeter-agent-task.xml` | the Windows workstation | Scheduled Task definition (boot trigger, no time limit, log capture) |

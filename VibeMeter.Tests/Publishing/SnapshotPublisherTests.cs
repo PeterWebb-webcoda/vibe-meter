@@ -21,7 +21,7 @@ namespace VibeMeter.Tests.Publishing;
 /// </summary>
 public sealed class SnapshotPublisherTests
 {
-    // Mirrors AiUsageRequestValidator.MaximumIdempotencyKeyLength.
+    // Mirrors the API's maximum idempotency-key length.
     private const int MaximumKeyLength = 128;
 
     private const string BearerToken = "stub-agent-bearer-token-0123456789abcdef-DO-NOT-LOG";
