@@ -358,8 +358,10 @@ answer if anything in this document disagrees with it.
 
 One UTF-8 JSON file per queued snapshot, named
 `{utcTicks:D19}-{idempotencyKey}.json`, capacity 500, oldest dropped when full.
-Entries hold only the mapped snapshot (ids, states, percentages) — never
-credentials.
+An entry the API has refused outright carries its tally of refusals in the name
+instead — `{utcTicks:D19}-{idempotencyKey}.rejected{n}.json` — so the count is
+as durable as the document itself and survives a restart. Entries hold only the
+mapped snapshot (ids, states, percentages) — never credentials.
 
 | OS | Path (for the account running the agent) |
 |---|---|
@@ -380,10 +382,10 @@ increasing N — is the reliable "failing to publish" signal.
 | Restart loop (config error)? | Same `Agent starting` line repeating every ~30 s with no `Published` lines | Same line repeating every ~1 min in `agent.log` |
 
 "Running but failing" looks like: process alive, no `Published snapshot` line
-for ≥ 1 interval, and instead `API unreachable (…)` (network/server),
-`Authentication failed (…)` (token/credential), or `API rejected the snapshot
-permanently` (bad request / clock skew) every cycle, plus `Snapshot queued …
-(N pending)`.
+for ≥ 1 interval, and instead `API unreachable (…)` (network/server/rate
+limit), `Authentication failed (…)` (token/credential), or `API rejected the
+snapshot (…)` (bad request / clock skew / an API rolled back behind this
+client) every cycle, plus `Snapshot queued … (N pending)`.
 
 ## 6. Troubleshooting
 
@@ -460,13 +462,25 @@ Which mode is in play is decided by `VIBEMETER_AGENT_CLIENT_ID`
 
 ### 6.2 API unreachable
 
-Network, DNS, TLS and 5xx responses are transient: the publisher retries in
-place (3 attempts, 30 s HTTP timeout each, ~2 s/4 s jittered backoff), then the
-snapshot is queued and every later cycle flushes oldest-first. Recovery is
-visible as `Flushed N queued snapshot(s)`. Entries the API will *never* accept —
-e.g. older than the server's accepted observation window — are discarded with
-`Discarding a queued snapshot the API will never accept (HTTP 400 …)`; this is
-expected after a long outage and is not data you can recover by retrying.
+Network, DNS, TLS, 5xx and 429 responses are transient: the publisher retries
+in place (3 attempts, 30 s HTTP timeout each, ~2 s/4 s jittered backoff), then
+the snapshot is queued and every later cycle flushes oldest-first. Recovery is
+visible as `Flushed N queued snapshot(s)`. A 429 additionally honours the
+server's `Retry-After` header (delta-seconds or HTTP-date) as a *floor* on the
+wait, clamped to 30 s so one header cannot stall the agent or its shutdown;
+past that the attempts are spent and the snapshot is queued as usual.
+
+A snapshot the API refuses outright (a non-auth 4xx) is **also kept**: the
+agent cannot tell "this payload is wrong" from "this API is behind the client"
+— a rolled-back API validating a newer payload against an older schema refuses
+it in exactly the same way — so the entry is re-offered once per cycle for up
+to 24 refusals (about two hours at the default interval). While that is
+happening you will see `N queued snapshot(s) were refused again and kept for a
+later attempt`. Only when the budget is spent is the entry dropped, with
+`Discarded a queued snapshot the API has now refused 24 times (HTTP 400 …)`;
+that is the one line that means data was deliberately lost, and it is expected
+for a snapshot older than the server's accepted observation window, which never
+does become valid.
 Sanity-check reachability from the box itself
 (`curl -s -o /dev/null -w "%{http_code}" https://api.example.com/api/v1/ai-usage/snapshots`
 returns *some* HTTP status — even 401 — if the endpoint is reachable; a
@@ -493,11 +507,13 @@ the API requires (it rejects any other offset, and rejects far-future
 timestamps). A wrong system clock therefore shows up as:
 
 ```text
-2026-09-17 08:14:07 Z [error] API rejected the snapshot permanently (HTTP 400 …); it will not be retried.
+2026-09-17 08:14:07 Z [error] API rejected the snapshot (HTTP 400 …); queueing it in case the API, not the payload, is what is wrong - it will be re-offered up to 24 times before being discarded.
 ```
 
-That snapshot is *not* queued — retrying can never succeed — and it repeats
-every cycle until the clock is fixed. Note the asymmetry: a future-skewed
+That snapshot *is* queued (the agent cannot tell a bad clock from a rolled-back
+API), so a burst of refused entries accumulates and ages out of the queue on
+its own once the clock is fixed; the line repeats every cycle until then. Note
+the asymmetry: a future-skewed
 timestamp is treated as *fresh* by the staleness gate (negative age), so skew
 never causes omission — it surfaces only as the 400 above. Fix:
 `w32tm /resync` (Rock, elevated) or `timedatectl set-ntp true` (Gladux), then

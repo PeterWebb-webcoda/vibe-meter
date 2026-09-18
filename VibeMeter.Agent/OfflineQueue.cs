@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 using VibeMeter.Agent.Publishing;
 
@@ -11,12 +12,30 @@ namespace VibeMeter.Agent;
 /// Windows (same-volume move) and Linux paths. The idempotency key is a pure
 /// function of the document, so if the "delete after send" step is ever missed,
 /// the re-sent entry de-duplicates server-side instead of creating a second row.
+/// An entry the API has refused outright carries its tally as
+/// <c>{utcTicks:D19}-{idempotencyKey}.rejected{n}.json</c> — the count lives in
+/// the name so it is as durable as the document and needs no second file or
+/// index to fall out of step with; the fixed-width tick prefix keeps FIFO order
+/// intact whatever the suffix.
 /// SECURITY: entries hold only the mapped snapshot document (ids, states,
 /// percentages) — never credentials or raw provider payloads.
 /// </summary>
 public sealed class OfflineQueue
 {
     public const int DefaultCapacity = 500;
+
+    /// <summary>
+    /// How many outright rejections one queued snapshot may collect before it
+    /// is discarded. The flush attempts each entry at most once per cycle, so
+    /// at the default five-minute interval this retains a refused snapshot for
+    /// about two hours — long enough to outlast a rolled-back API being rolled
+    /// forward again, and short enough that a genuinely malformed document
+    /// costs at most this many wasted requests, spread thin, before the agent
+    /// gives up on it loudly.
+    /// </summary>
+    public const int MaxRejections = 24;
+
+    private const string RejectionMarker = ".rejected";
 
     private readonly string _directory;
     private readonly int _capacity;
@@ -43,7 +62,17 @@ public sealed class OfflineQueue
     /// </summary>
     public bool Enqueue(string document, DateTimeOffset observedAt)
     {
-        var finalPath = Path.Combine(_directory, EntryName(document, observedAt));
+        var baseName = BaseName(document, observedAt);
+
+        // The identity check has to see through the rejection marker too:
+        // without this, re-offering a document that is already queued and
+        // refused would add a second copy with a fresh rejection budget.
+        if (Directory.EnumerateFiles(_directory, baseName + "*.json").Any())
+        {
+            return false;
+        }
+
+        var finalPath = Path.Combine(_directory, baseName + ".json");
         var tempPath = finalPath + ".tmp";
         try
         {
@@ -95,8 +124,72 @@ public sealed class OfflineQueue
     /// </summary>
     public void Remove(string path) => TryDelete(path);
 
-    private string EntryName(string document, DateTimeOffset observedAt) =>
-        $"{observedAt.UtcTicks:D19}-{IdempotencyKey.For(document)}.json";
+    /// <summary>
+    /// How many times the API has already refused this entry outright. Zero for
+    /// an entry that has never been rejected, and for any name that does not
+    /// carry a readable marker — an unreadable tally must never be treated as
+    /// "nearly spent" and cost the snapshot.
+    /// </summary>
+    public static int RejectionsOf(string path)
+    {
+        var name = Path.GetFileNameWithoutExtension(path);
+        var marker = name.IndexOf(RejectionMarker, StringComparison.Ordinal);
+        if (marker < 0)
+        {
+            return 0;
+        }
+
+        return int.TryParse(
+            name[(marker + RejectionMarker.Length)..],
+            NumberStyles.None,
+            CultureInfo.InvariantCulture,
+            out var rejections)
+            ? rejections
+            : 0;
+    }
+
+    /// <summary>
+    /// Records one more outright rejection of a queued entry. Returns true when
+    /// the entry is retained (its tally rises by one), false when the budget in
+    /// <see cref="MaxRejections"/> is spent and the entry has been discarded —
+    /// the caller logs that loudly, because it is the one path on which data is
+    /// deliberately lost.
+    /// </summary>
+    public bool RecordRejection(string path)
+    {
+        var rejections = RejectionsOf(path) + 1;
+        if (rejections >= MaxRejections)
+        {
+            TryDelete(path);
+            return false;
+        }
+
+        var renamed = Path.Combine(
+            _directory,
+            $"{StripRejectionMarker(Path.GetFileNameWithoutExtension(path))}{RejectionMarker}{rejections}.json");
+        try
+        {
+            File.Move(path, renamed, overwrite: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            // Momentarily locked (a scanner, a racing flush). The tally simply
+            // stays where it was and the next cycle tries again; an entry we
+            // cannot rename is one we could not have deleted either, so this
+            // costs an extra attempt, never the snapshot.
+        }
+
+        return true;
+    }
+
+    private static string BaseName(string document, DateTimeOffset observedAt) =>
+        $"{observedAt.UtcTicks:D19}-{IdempotencyKey.For(document)}";
+
+    private static string StripRejectionMarker(string nameWithoutExtension)
+    {
+        var marker = nameWithoutExtension.IndexOf(RejectionMarker, StringComparison.Ordinal);
+        return marker < 0 ? nameWithoutExtension : nameWithoutExtension[..marker];
+    }
 
     private List<string> ListEntryPaths()
     {

@@ -20,7 +20,12 @@ internal enum CycleOutcome
     /// <summary>Publish failed on auth or a transient problem; the snapshot is queued on disk for a later flush.</summary>
     QueuedForLater,
 
-    /// <summary>The API rejected the snapshot permanently; it was deliberately not queued.</summary>
+    /// <summary>
+    /// The API refused the snapshot outright rather than merely failing to take
+    /// it. The snapshot is still queued — on a bounded budget — in case the
+    /// refusal is the API's and not ours, but the cycle reports the rejection
+    /// distinctly because it is the outcome worth investigating.
+    /// </summary>
     RejectedPermanently,
 
     /// <summary>Collection, freshness or mapping failed, so no snapshot was produced.</summary>
@@ -140,6 +145,7 @@ public sealed class AgentHost
         }
 
         var result = await _publisher.PublishAsync(collected.Mapped.Json, cancellationToken);
+        var rejected = false;
         switch (result.Outcome)
         {
             case PublishOutcome.Success:
@@ -151,8 +157,20 @@ public sealed class AgentHost
                 break;
 
             case PublishOutcome.PermanentFailure:
-                AgentLog.Error($"API rejected the snapshot permanently ({Describe(result)}); it will not be retried.");
-                return CycleOutcome.RejectedPermanently;
+                // "The API refused this document" is not the same fact as "this
+                // document is wrong". The agent cannot tell the two apart from a
+                // 4xx: an API rolled back behind a client that already emits the
+                // newer schema rejects perfectly good payloads exactly this way.
+                // Discarding here made a rollback cost data permanently, so the
+                // snapshot is queued like any other failure and re-offered on a
+                // bounded budget (OfflineQueue.MaxRejections) — a rollback then
+                // costs latency, and only a payload that stays refused for the
+                // whole budget is finally given up on.
+                AgentLog.Error(
+                    $"API rejected the snapshot ({Describe(result)}); queueing it in case the API, not the payload, " +
+                    $"is what is wrong - it will be re-offered up to {OfflineQueue.MaxRejections} times before being discarded.");
+                rejected = true;
+                break;
 
             case PublishOutcome.TransientFailure:
             default:
@@ -176,18 +194,25 @@ public sealed class AgentHost
             AgentLog.Error($"Could not queue the snapshot for later upload: {ex.Message}");
         }
 
-        return CycleOutcome.QueuedForLater;
+        return rejected ? CycleOutcome.RejectedPermanently : CycleOutcome.QueuedForLater;
     }
 
     /// <summary>
     /// Sends queued snapshots oldest-first. Stops at the first transient or
-    /// auth failure (entries stay queued for a later cycle) and permanently
-    /// discards entries the API rejects outright - e.g. a snapshot older than
-    /// the server's accepted observation window can never become valid.
+    /// auth failure (entries stay queued for a later cycle). An entry the API
+    /// refuses outright is kept and re-offered next cycle, up to
+    /// <see cref="OfflineQueue.MaxRejections"/> times: the refusal may be the
+    /// API's (a rollback validating against an older schema) rather than the
+    /// document's, and the agent cannot tell which from a 4xx. Only once that
+    /// budget is spent is the entry discarded - a snapshot older than the
+    /// server's accepted observation window, say, never does become valid.
+    /// One refused entry never blocks the rest: the flush moves on to the next.
     /// </summary>
     public async Task FlushQueueAsync(CancellationToken cancellationToken)
     {
         var flushed = 0;
+        var rejected = 0;
+        var discarded = 0;
         foreach (var path in _queue.EnumerateEntryPaths())
         {
             if (!_queue.TryReadEntry(path, out var document))
@@ -204,8 +229,18 @@ public sealed class AgentHost
                     break;
 
                 case PublishOutcome.PermanentFailure:
-                    AgentLog.Warn($"Discarding a queued snapshot the API will never accept ({Describe(result)}).");
-                    _queue.Remove(path);
+                    if (_queue.RecordRejection(path))
+                    {
+                        rejected++;
+                    }
+                    else
+                    {
+                        AgentLog.Warn(
+                            $"Discarded a queued snapshot the API has now refused {OfflineQueue.MaxRejections} times " +
+                            $"({Describe(result)}); it is being treated as unacceptable rather than retried forever.");
+                        discarded++;
+                    }
+
                     break;
 
                 case PublishOutcome.AuthFailure:
@@ -214,6 +249,7 @@ public sealed class AgentHost
                         AgentLog.Info($"Flushed {flushed} queued snapshot(s) before authentication failed.");
                     }
 
+                    ReportRejections();
                     AgentLog.Error($"Not authenticated ({Describe(result)}) - {_queue.Count} snapshot(s) stay queued.");
                     return;
 
@@ -224,6 +260,7 @@ public sealed class AgentHost
                         AgentLog.Info($"Flushed {flushed} queued snapshot(s) before the API became unreachable.");
                     }
 
+                    ReportRejections();
                     AgentLog.Warn($"API unreachable ({Describe(result)}) - {_queue.Count} snapshot(s) stay queued.");
                     return;
             }
@@ -232,6 +269,29 @@ public sealed class AgentHost
         if (flushed > 0)
         {
             AgentLog.Info($"Flushed {flushed} queued snapshot(s).");
+        }
+
+        ReportRejections();
+        return;
+
+        // One line per flush rather than one per entry: while an API is rolled
+        // back every queued snapshot is refused every cycle, and a per-entry
+        // warning would bury the fact in its own noise.
+        void ReportRejections()
+        {
+            if (rejected > 0)
+            {
+                AgentLog.Warn(
+                    $"{rejected} queued snapshot(s) were refused again and kept for a later attempt; " +
+                    $"{discarded} reached the {OfflineQueue.MaxRejections}-rejection limit and were discarded.");
+            }
+            else if (discarded > 0)
+            {
+                AgentLog.Warn($"{discarded} queued snapshot(s) reached the {OfflineQueue.MaxRejections}-rejection limit and were discarded.");
+            }
+
+            rejected = 0;
+            discarded = 0;
         }
     }
 

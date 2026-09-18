@@ -10,6 +10,9 @@ namespace VibeMeter.Tests;
 /// successful publish and an all-stale cycle are successes; a snapshot that
 /// could only be queued, or was rejected outright, is not. (The outcome-to-
 /// exit-code mapping itself is Program.OnceExitCode, pinned in AgentCliTests.)
+/// Also pins what happens to the snapshot itself on each of those paths -
+/// above all that a rejection retains it, on a bounded budget, instead of
+/// destroying it.
 /// </summary>
 public sealed class AgentHostOutcomeTests : IDisposable
 {
@@ -75,12 +78,60 @@ public sealed class AgentHostOutcomeTests : IDisposable
     }
 
     [Fact]
-    public async Task PermanentRejection_IsNotQueued()
+    public async Task PermanentRejection_IsStillQueued_SoARollbackCostsLatencyNotData()
     {
+        // The regression: the cycle used to return before the enqueue block, so
+        // an API that was merely BEHIND the client - rolled back, validating a
+        // newer payload against an older schema - silently destroyed every
+        // snapshot it rejected. The outcome stays distinct (it is the one worth
+        // investigating) but the document survives.
         var host = CreateHost(new OutcomePublisher(PublishOutcome.PermanentFailure, 422), Live("codex"));
 
         Assert.Equal(CycleOutcome.RejectedPermanently, await host.RunOneCycleAsync(CancellationToken.None));
+        Assert.Equal(1, _queue.Count);
+
+        // Queued with a full budget: the cycle's own refusal is the reason it
+        // is here, not the first strike against it.
+        Assert.Equal(0, OfflineQueue.RejectionsOf(_queue.EnumerateEntryPaths()[0]));
+    }
+
+    [Fact]
+    public async Task ARepeatedlyRejectedSnapshot_SurvivesTheFlush_UntilItsBudgetIsSpent()
+    {
+        var host = CreateHost(new OutcomePublisher(PublishOutcome.PermanentFailure, 400), Live("codex"));
+        _queue.Enqueue("""{"providers":[{"providerId":"codex"}]}""", DateTimeOffset.UtcNow);
+
+        for (var flush = 1; flush < OfflineQueue.MaxRejections; flush++)
+        {
+            await host.FlushQueueAsync(CancellationToken.None);
+
+            Assert.Equal(1, _queue.Count);
+            Assert.Equal(flush, OfflineQueue.RejectionsOf(_queue.EnumerateEntryPaths()[0]));
+        }
+
+        // ...and the budget really is finite: a document the API never accepts
+        // is given up on rather than re-sent forever.
+        await host.FlushQueueAsync(CancellationToken.None);
+
         Assert.Equal(0, _queue.Count);
+    }
+
+    [Fact]
+    public async Task ARejectedEntry_DoesNotBlockTheEntriesBehindIt()
+    {
+        var publisher = new ScriptedPublisher(PublishOutcome.PermanentFailure, PublishOutcome.Success);
+        var host = CreateHost(publisher, Live("codex"));
+        _queue.Enqueue("refused", DateTimeOffset.UtcNow.AddMinutes(-2));
+        _queue.Enqueue("accepted", DateTimeOffset.UtcNow.AddMinutes(-1));
+
+        await host.FlushQueueAsync(CancellationToken.None);
+
+        Assert.Equal(["refused", "accepted"], publisher.Documents);
+
+        var remaining = Assert.Single(_queue.EnumerateEntryPaths());
+        Assert.True(_queue.TryReadEntry(remaining, out var document));
+        Assert.Equal("refused", document);
+        Assert.Equal(1, OfflineQueue.RejectionsOf(remaining));
     }
 
     private AgentHost CreateHost(params ProviderUsage[] results) => CreateHost(_publisher, results);
@@ -117,6 +168,25 @@ public sealed class AgentHostOutcomeTests : IDisposable
     {
         public Task<PublishResult> PublishAsync(string document, CancellationToken cancellationToken) =>
             Task.FromResult(new PublishResult(outcome, statusCode, "stub"));
+    }
+
+    /// <summary>A publisher that walks a script of outcomes, repeating the last
+    /// one once the script runs dry, and records what it was handed.</summary>
+    private sealed class ScriptedPublisher(params PublishOutcome[] script) : ISnapshotPublisher
+    {
+        private int _index;
+
+        public List<string> Documents { get; } = new();
+
+        public Task<PublishResult> PublishAsync(string document, CancellationToken cancellationToken)
+        {
+            Documents.Add(document);
+            var outcome = script[Math.Min(_index++, script.Length - 1)];
+            return Task.FromResult(new PublishResult(
+                outcome,
+                outcome == PublishOutcome.Success ? 200 : 400,
+                "stub"));
+        }
     }
 
     private static ProviderUsage Live(string id) => new()

@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Globalization;
 using System.Net;
+using System.Net.Http.Headers;
 using System.Net.Sockets;
 using System.Text;
 using VibeMeter.Agent.AccessToken;
@@ -26,8 +28,9 @@ public sealed class SnapshotPublisherTests
     private const string Document = """{"providers":[{"providerId":"codex"}]}""";
     private const string SnapshotsPath = "/api/v1/ai-usage/snapshots";
 
-    // The worst scripted cycle is two backoffs (≈3 s + ≈6 s at most) plus
-    // three attempts; past this a test is wedged, not slow, and should fail.
+    // The worst scripted cycle is two backoffs (≈3 s + ≈6 s at most, and no
+    // scripted Retry-After here asks for longer) plus three attempts; past
+    // this a test is wedged, not slow, and should fail.
     private static readonly TimeSpan TestTimeout = TimeSpan.FromSeconds(25);
 
     // --------------------------------------------- the required behaviours
@@ -83,6 +86,84 @@ public sealed class SnapshotPublisherTests
         Assert.Equal(status, result.StatusCode);
         Assert.Equal(1, api.RequestCount);
         Assert.Empty(api.Faults);
+    }
+
+    [Fact]
+    public async Task RateLimited_IsRetried_AfterWaitingOutTheRetryAfterHeader()
+    {
+        // The regression: 429 is below 500, so the old "every other 4xx is
+        // permanent" branch returned before the retry — a rate-limited agent
+        // never tried again, and the host then threw the snapshot away.
+        using var api = LoopbackApi.Serving(
+            Scripted(429, retryAfter: "5"),
+            Scripted(200));
+
+        var elapsed = Stopwatch.StartNew();
+        var result = await PublishOnceAsync(api);
+        elapsed.Stop();
+
+        Assert.Equal(PublishOutcome.Success, result.Outcome);
+        Assert.Equal(2, api.RequestCount);
+
+        // The jittered backoff for the first retry tops out at 3 s, so a wait
+        // anywhere near 5 s can only be the Retry-After being honoured. The
+        // small tolerance is for the timer firing a tick early.
+        Assert.True(
+            elapsed.Elapsed >= TimeSpan.FromSeconds(4.5),
+            $"retried after only {elapsed.Elapsed}, so Retry-After was ignored");
+
+        // Still one key across the retry, so the server de-duplicates.
+        Assert.Single(api.Requests.Select(request => request.IdempotencyKey).Distinct());
+        Assert.Empty(api.Faults);
+    }
+
+    [Fact]
+    public async Task RateLimitedThroughout_IsTransient_NotPermanent()
+    {
+        // Retried to the cap and then reported transient, which is what makes
+        // the host queue the snapshot instead of discarding it.
+        using var api = LoopbackApi.Serving(
+            Scripted(429, retryAfter: "1"),
+            Scripted(429, retryAfter: "1"),
+            Scripted(429, retryAfter: "1"));
+
+        var result = await PublishOnceAsync(api);
+
+        Assert.Equal(PublishOutcome.TransientFailure, result.Outcome);
+        Assert.Equal(429, result.StatusCode);
+        Assert.Equal(3, api.RequestCount);
+        Assert.Empty(api.Faults);
+    }
+
+    [Fact]
+    public void RetryAfter_HonoursBothWireForms_AndIsBounded()
+    {
+        var now = new DateTimeOffset(2026, 9, 18, 4, 0, 0, TimeSpan.Zero);
+
+        // No header at all: the caller keeps its own backoff.
+        Assert.Equal(TimeSpan.Zero, SnapshotPublisher.RequestedRetryDelay(null, now));
+
+        // delta-seconds and HTTP-date are both legal spellings of the same ask.
+        Assert.Equal(
+            TimeSpan.FromSeconds(7),
+            SnapshotPublisher.RequestedRetryDelay(new RetryConditionHeaderValue(TimeSpan.FromSeconds(7)), now));
+        Assert.Equal(
+            TimeSpan.FromSeconds(12),
+            SnapshotPublisher.RequestedRetryDelay(new RetryConditionHeaderValue(now.AddSeconds(12)), now));
+
+        // A date already past asks for no extra wait, never a negative one.
+        Assert.Equal(
+            TimeSpan.Zero,
+            SnapshotPublisher.RequestedRetryDelay(new RetryConditionHeaderValue(now.AddMinutes(-5)), now));
+
+        // Hostile or merely absurd values are clamped: one response header must
+        // never be able to stall the agent (or its shutdown) for hours.
+        Assert.Equal(
+            TimeSpan.FromSeconds(30),
+            SnapshotPublisher.RequestedRetryDelay(new RetryConditionHeaderValue(TimeSpan.FromDays(3)), now));
+        Assert.Equal(
+            TimeSpan.FromSeconds(30),
+            SnapshotPublisher.RequestedRetryDelay(new RetryConditionHeaderValue(now.AddYears(1)), now));
     }
 
     [Theory]
@@ -252,6 +333,14 @@ public sealed class SnapshotPublisherTests
         string IdempotencyKey,
         string Body);
 
+    /// <summary>One scripted response: a status, and optionally the exact
+    /// <c>Retry-After</c> value to send with it (raw, so both the
+    /// delta-seconds and HTTP-date spellings can be exercised on the wire).</summary>
+    private sealed record ScriptedResponse(int Status, string? RetryAfter = null);
+
+    private static ScriptedResponse Scripted(int status, string? retryAfter = null) =>
+        new(status, retryAfter);
+
     /// <summary>A scripted HTTP/1.1 stub on 127.0.0.1. Each request consumes
     /// the next scripted status code; once the script runs dry it serves 500,
     /// so an unexpected retry flips the outcome and fails the calling test. It
@@ -261,19 +350,22 @@ public sealed class SnapshotPublisherTests
         private readonly TcpListener _listener;
         private readonly CancellationTokenSource _shutdown = new();
         private readonly ConcurrentQueue<CapturedRequest> _requests = new();
-        private readonly ConcurrentQueue<int> _script;
+        private readonly ConcurrentQueue<ScriptedResponse> _script;
         private Task _acceptLoop = Task.CompletedTask;
 
-        private LoopbackApi(int[] script)
+        private LoopbackApi(ScriptedResponse[] script)
         {
-            _script = new ConcurrentQueue<int>(script);
+            _script = new ConcurrentQueue<ScriptedResponse>(script);
             _listener = new TcpListener(IPAddress.Loopback, 0);
             _listener.Start();
             var port = ((IPEndPoint)_listener.LocalEndpoint).Port;
             BaseAddress = new Uri($"http://127.0.0.1:{port}/");
         }
 
-        public static LoopbackApi Serving(params int[] script)
+        public static LoopbackApi Serving(params int[] script) =>
+            Serving(script.Select(status => new ScriptedResponse(status)).ToArray());
+
+        public static LoopbackApi Serving(params ScriptedResponse[] script)
         {
             var api = new LoopbackApi(script);
             api._acceptLoop = Task.Run(api.AcceptLoopAsync);
@@ -347,7 +439,7 @@ public sealed class SnapshotPublisherTests
                     _requests.Enqueue(request);
                     await WriteResponseAsync(
                         stream,
-                        _script.TryDequeue(out var status) ? status : 500);
+                        _script.TryDequeue(out var scripted) ? scripted : new ScriptedResponse(500));
                 }
             }
         }
@@ -406,8 +498,9 @@ public sealed class SnapshotPublisherTests
                 Encoding.UTF8.GetString(bytes, headerEnd + 4, contentLength));
         }
 
-        private async Task WriteResponseAsync(NetworkStream stream, int status)
+        private async Task WriteResponseAsync(NetworkStream stream, ScriptedResponse scripted)
         {
+            var status = scripted.Status;
             var (reason, body) = status switch
             {
                 200 => ("OK", "stub-ok"),
@@ -418,6 +511,7 @@ public sealed class SnapshotPublisherTests
                 401 or 403 => ("Unauthorized", "stub-unauthorized-or-forbidden-detail"),
                 404 => ("Not Found", "stub-not-found"),
                 422 => ("Unprocessable Entity", "stub-unprocessable"),
+                429 => ("Too Many Requests", "stub-rate-limited"),
                 _ => ("Internal Server Error", "stub-server-error"),
             };
 
@@ -425,6 +519,7 @@ public sealed class SnapshotPublisherTests
             var head =
                 $"HTTP/1.1 {status} {reason}\r\n"
                 + "Content-Type: text/plain; charset=utf-8\r\n"
+                + (scripted.RetryAfter is { } retryAfter ? $"Retry-After: {retryAfter}\r\n" : "")
                 + $"Content-Length: {bodyBytes.Length}\r\n"
                 + "\r\n";
 

@@ -14,10 +14,20 @@ public enum PublishOutcome
     /// <summary>401/403 or no token — a credentials problem, surfaced distinctly.</summary>
     AuthFailure,
 
-    /// <summary>Other 4xx — the request itself is wrong; retrying can never succeed.</summary>
+    /// <summary>
+    /// A 4xx other than 401/403/429 — this build of the API refused the request
+    /// itself, so repeating it in place cannot help. It does NOT mean the
+    /// document is worthless: the API on the other end can change under us (a
+    /// rollback leaves an older validator rejecting a newer payload), so the
+    /// caller retains the snapshot for a bounded number of later attempts
+    /// rather than destroying it. See <see cref="AgentHost.FlushQueueAsync"/>.
+    /// </summary>
     PermanentFailure,
 
-    /// <summary>5xx or network failure — worth queueing and retrying later.</summary>
+    /// <summary>
+    /// 5xx, 429, or a network failure — the same request can succeed later, so
+    /// it is worth retrying in place and then queueing.
+    /// </summary>
     TransientFailure,
 }
 
@@ -68,6 +78,18 @@ public sealed class SnapshotPublisher : ISnapshotPublisher, IDisposable
         TimeSpan.FromSeconds(4),
     ];
 
+    /// <summary>
+    /// Ceiling on a <c>Retry-After</c> the server asks us to honour. A rate
+    /// limiter is entitled to say "come back in an hour", and a hostile or
+    /// simply mistaken value could say far worse; obeying either literally
+    /// would wedge the collection loop — and its shutdown — behind one header.
+    /// Past this the agent stops waiting, exhausts its attempts and lets the
+    /// cycle queue the snapshot instead, which costs latency, not data.
+    /// Matched to the per-attempt HTTP timeout so one attempt can never block
+    /// the cycle for longer than the transport already could.
+    /// </summary>
+    private static readonly TimeSpan MaxRetryAfterDelay = TimeSpan.FromSeconds(30);
+
     private readonly IAccessTokenProvider _tokens;
     private readonly HttpClient _httpClient;
 
@@ -85,9 +107,10 @@ public sealed class SnapshotPublisher : ISnapshotPublisher, IDisposable
     public void Dispose() => _httpClient.Dispose();
 
     /// <summary>
-    /// Publishes one document. Transient failures (5xx, network) are retried in
-    /// place with jittered backoff; auth failures and other 4xx are returned
-    /// immediately so the caller can queue-or-drop.
+    /// Publishes one document. Transient failures (5xx, 429, network) are
+    /// retried in place with jittered backoff, honouring any
+    /// <c>Retry-After</c>; auth failures and the remaining 4xx are returned
+    /// immediately so the caller can decide how long to keep the document.
     /// </summary>
     public async Task<PublishResult> PublishAsync(string document, CancellationToken cancellationToken)
     {
@@ -131,7 +154,8 @@ public sealed class SnapshotPublisher : ISnapshotPublisher, IDisposable
                     return new PublishResult(PublishOutcome.TransientFailure, null, ex.Message);
                 }
 
-                await DelayBeforeRetryAsync(attempt, cancellationToken);
+                // No response, so no Retry-After to honour.
+                await DelayBeforeRetryAsync(attempt, retryAfter: null, cancellationToken);
                 continue;
             }
 
@@ -150,10 +174,17 @@ public sealed class SnapshotPublisher : ISnapshotPublisher, IDisposable
                     return new PublishResult(PublishOutcome.AuthFailure, status, detail);
                 }
 
-                // Other 4xx: the request is wrong (validation, too-old snapshot,
-                // payload limits) and will fail identically forever — never retry.
-                if (status < 500)
+                // 429 is the one 4xx that says nothing about the request: the
+                // server is asking us to slow down, so the identical payload
+                // succeeds once the window moves. Classing it permanent (as
+                // "any 4xx is permanent" used to) meant a rate-limited agent
+                // never retried at all.
+                if (status is not 429 && status < 500)
                 {
+                    // The remaining 4xx: this build of the API refused the
+                    // request (validation, too-old snapshot, payload limits).
+                    // Repeating it immediately cannot help, so stop here — but
+                    // see PermanentFailure: the caller still keeps the document.
                     return new PublishResult(PublishOutcome.PermanentFailure, status, detail);
                 }
 
@@ -162,18 +193,52 @@ public sealed class SnapshotPublisher : ISnapshotPublisher, IDisposable
                     return new PublishResult(PublishOutcome.TransientFailure, status, detail);
                 }
 
-                await DelayBeforeRetryAsync(attempt, cancellationToken);
+                await DelayBeforeRetryAsync(attempt, response.Headers.RetryAfter, cancellationToken);
             }
         }
     }
 
-    private static async Task DelayBeforeRetryAsync(int attempt, CancellationToken cancellationToken)
+    private static async Task DelayBeforeRetryAsync(
+        int attempt,
+        RetryConditionHeaderValue? retryAfter,
+        CancellationToken cancellationToken)
     {
         var baseDelay = BackoffDelays[Math.Min(attempt, BackoffDelays.Length) - 1];
 
         // ±50% jitter so several agents restarting together don't hammer the API in lock-step.
         var delay = TimeSpan.FromMilliseconds(baseDelay.TotalMilliseconds * (0.5 + Random.Shared.NextDouble()));
-        await Task.Delay(delay, cancellationToken);
+
+        // Retry-After is a floor, not a replacement: when the server names a
+        // longer wait we take it, and when it names a shorter one we still
+        // keep our own backoff rather than hammering it sooner.
+        var requested = RequestedRetryDelay(retryAfter, DateTimeOffset.UtcNow);
+        await Task.Delay(requested > delay ? requested : delay, cancellationToken);
+    }
+
+    /// <summary>
+    /// The wait a <c>Retry-After</c> header asks for, clamped into
+    /// [0, <see cref="MaxRetryAfterDelay"/>]. Both wire forms are honoured:
+    /// delta-seconds, and an HTTP-date turned into a delta against
+    /// <paramref name="utcNow"/>. Returns <see cref="TimeSpan.Zero"/> when the
+    /// header is absent, unparseable (HttpClient leaves such a header
+    /// unparsed rather than throwing), or names a moment already past — in
+    /// each case the caller falls back to its own backoff.
+    /// </summary>
+    internal static TimeSpan RequestedRetryDelay(RetryConditionHeaderValue? retryAfter, DateTimeOffset utcNow)
+    {
+        var requested = retryAfter switch
+        {
+            { Delta: { } delta } => delta,
+            { Date: { } date } => date - utcNow,
+            _ => TimeSpan.Zero,
+        };
+
+        if (requested <= TimeSpan.Zero)
+        {
+            return TimeSpan.Zero;
+        }
+
+        return requested > MaxRetryAfterDelay ? MaxRetryAfterDelay : requested;
     }
 
     private static async Task<string> ReadDetailAsync(HttpResponseMessage response, CancellationToken cancellationToken)
