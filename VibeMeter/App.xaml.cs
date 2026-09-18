@@ -20,6 +20,14 @@ public partial class App : Application
     private SettingsService? _settingsService;
     private ProviderRegistry? _registry;
 
+    /// <summary>
+    /// Publishing to the collection API, or null when the user has not opted in
+    /// (the default). Owned here rather than by the view model because the
+    /// sign-in prompt needs the tray icon, and because it must be disposed —
+    /// which is what cancels an in-flight publish at exit.
+    /// </summary>
+    private VibeMeter.Publishing.DesktopPublishHost? _publishHost;
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
@@ -107,9 +115,52 @@ public partial class App : Application
         _refreshTimer.Interval = TimeSpan.FromSeconds(_mainViewModel.RefreshIntervalSeconds);
         _refreshTimer.Start();
 
+        // Opt-in publishing. Built after the tray icon, which is where the
+        // device-code prompt is shown; this only reads settings and (when
+        // switched on) creates a queue directory, so it never delays startup and
+        // never asks anyone to sign in.
+        RestartPublishing();
+
         // Initial refresh + show
         _ = _mainViewModel.RefreshAsync();
         _mainWindow.Show();
+    }
+
+    /// <summary>
+    /// (Re)builds the publish host from the saved settings. Called at startup
+    /// and again after the settings are saved, so ticking the opt-in takes
+    /// effect immediately rather than at the next launch.
+    /// </summary>
+    private void RestartPublishing()
+    {
+        if (_settingsService == null || _mainViewModel == null) return;
+
+        // Disposing cancels anything in flight; it is bounded so it cannot hang
+        // the UI thread. Anything unsent is already on disk in the offline
+        // queue, and the replacement host flushes it on its first publish.
+        _publishHost?.Dispose();
+        _publishHost = TrayPublishing.TryStart(_settingsService.Load(), ShowSignInPrompt);
+        _mainViewModel.UsePublishHost(_publishHost);
+    }
+
+    /// <summary>
+    /// Shows the device-code sign-in message where the user will actually see
+    /// it: a tray balloon, plus a line in the error log because a balloon
+    /// disappears and the code is valid for several minutes longer than that.
+    /// </summary>
+    /// <remarks>
+    /// The message arrives on the publishing thread, so the balloon is
+    /// marshalled to the dispatcher. It carries a verification URL and a user
+    /// code and never a token, so it is safe to display and to log.
+    /// </remarks>
+    private void ShowSignInPrompt(string message)
+    {
+        ErrorLog.Write(ErrorLogPublishLog.Source, "Publishing", message);
+
+        Dispatcher.BeginInvoke(() =>
+        {
+            _notifyIcon?.ShowBalloonTip("Vibe Meter: sign in to publish", message, BalloonIcon.Info);
+        });
     }
 
     private void ToggleMainWindow()
@@ -149,13 +200,16 @@ public partial class App : Application
 
         if (_mainViewModel == null || _settingsService == null) return;
 
-        var settingsViewModel = new SettingsViewModel(_mainViewModel, _settingsService);
+        var settingsViewModel = new SettingsViewModel(_mainViewModel, _settingsService, RestartPublishing);
         _settingsWindow = new SettingsWindow(settingsViewModel);
         _settingsWindow.Show();
     }
 
     protected override void OnExit(ExitEventArgs e)
     {
+        // Cancels any publish still in flight (bounded — see DesktopPublishHost.Dispose)
+        // so the process is not held open by an HTTP attempt nobody is waiting for.
+        _publishHost?.Dispose();
         _notifyIcon?.Dispose();
         base.OnExit(e);
     }

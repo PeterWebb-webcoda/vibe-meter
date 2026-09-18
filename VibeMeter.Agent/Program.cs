@@ -242,10 +242,13 @@ internal static class Program
         }
     }
 
-    /// <summary>--once exit semantics: 0 = published or nothing to publish;
-    /// non-zero = the cycle failed or the snapshot was only queued.</summary>
+    /// <summary>--once exit semantics: 0 = published, nothing to publish, or
+    /// deliberately not worth publishing; non-zero = the cycle failed or the
+    /// snapshot was only queued. A policy skip is a success: the run did its
+    /// job and concluded the server already knows, so a scheduled --once that
+    /// runs more often than the policy publishes must not report failure.</summary>
     internal static int OnceExitCode(CycleOutcome outcome) =>
-        outcome is CycleOutcome.Published or CycleOutcome.NothingToPublish ? 0 : 1;
+        outcome is CycleOutcome.Published or CycleOutcome.NothingToPublish or CycleOutcome.SkippedByPolicy ? 0 : 1;
 
     // Same provider set the WPF app registers; each constructs parameterless
     // and reports NotConfigured itself when its local credentials are absent.

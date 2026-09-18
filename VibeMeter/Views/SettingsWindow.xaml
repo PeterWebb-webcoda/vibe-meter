@@ -6,7 +6,7 @@
         xmlns:vm="clr-namespace:VibeMeter.ViewModels"
         mc:Ignorable="d"
         Title="Vibe Meter Settings"
-        Height="520" Width="460"
+        Height="600" Width="460"
         WindowStartupLocation="CenterScreen"
         Background="#252540"
         Foreground="White"
@@ -22,6 +22,15 @@
         </Style>
         <Style TargetType="ComboBox">
             <Setter Property="Margin" Value="0,4"/>
+        </Style>
+        <Style TargetType="TextBox">
+            <Setter Property="Margin" Value="0,2,0,8"/>
+            <Setter Property="Padding" Value="5,3"/>
+            <Setter Property="Background" Value="#1E1E32"/>
+            <Setter Property="Foreground" Value="White"/>
+            <Setter Property="CaretBrush" Value="White"/>
+            <Setter Property="BorderBrush" Value="#38FFFFFF"/>
+            <Setter Property="BorderThickness" Value="1"/>
         </Style>
     </Window.Resources>
 
@@ -40,7 +49,10 @@
 
         <Border Grid.Row="1" Height="1" Background="#38FFFFFF" Margin="0,0,0,16"/>
 
-        <StackPanel Grid.Row="2">
+        <!-- Scrolls: the settings list is now longer than any window height we could
+             sensibly pick, and clipping the bottom section would hide it entirely. -->
+        <ScrollViewer Grid.Row="2" VerticalScrollBarVisibility="Auto" Padding="0,0,10,0">
+        <StackPanel>
 
             <TextBlock Text="Providers" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,4"/>
             <ItemsControl ItemsSource="{Binding ProviderToggles}" Margin="0,0,0,12">
@@ -134,7 +146,37 @@
                     HorizontalAlignment="Left" Margin="0,0,0,4"/>
             <TextBlock x:Name="GoogleAccountStatus" FontSize="11" Foreground="#B0B0C0" Margin="0,4,0,0"/>
 
+            <Border Height="1" Background="#38FFFFFF" Margin="0,12"/>
+
+            <!-- Publishing to the collection API. Off by default: this is the only
+                 setting that sends anything off the machine. -->
+            <TextBlock Text="Publish usage" FontSize="13" FontWeight="SemiBold" Margin="0,0,0,4"/>
+            <TextBlock Text="Sends this machine's provider states and percentages to the collection API after each refresh, so the companion mobile app can show them. Never your provider credentials. Off unless you turn it on."
+                       FontSize="11" Foreground="#B0B0C0" Margin="0,0,0,8" TextWrapping="Wrap"/>
+
+            <CheckBox Content="Publish this machine's usage after each refresh"
+                      IsChecked="{Binding PublishEnabled}" Margin="0,0,0,8"/>
+
+            <TextBlock Text="Collection API base URL" FontSize="11" Foreground="#B0B0C0"/>
+            <TextBox Text="{Binding PublishApiBaseUrl, UpdateSourceTrigger=PropertyChanged}"/>
+
+            <TextBlock Text="Entra application (client) id" FontSize="11" Foreground="#B0B0C0"/>
+            <TextBox Text="{Binding PublishClientId, UpdateSourceTrigger=PropertyChanged}"/>
+
+            <TextBlock Text="Entra directory (tenant) id" FontSize="11" Foreground="#B0B0C0"/>
+            <TextBox Text="{Binding PublishTenantId, UpdateSourceTrigger=PropertyChanged}"/>
+
+            <TextBlock Text="Delegated scope" FontSize="11" Foreground="#B0B0C0"/>
+            <TextBox Text="{Binding PublishScope, UpdateSourceTrigger=PropertyChanged}"/>
+
+            <TextBlock Text="Signing in uses a device code: the first publish shows a short code in a tray notification, which you enter on another device or in a browser. Nothing blocks while you do."
+                       FontSize="11" Foreground="#B0B0C0" Margin="0,0,0,6" TextWrapping="Wrap"/>
+
+            <TextBlock Text="{Binding PublishStatusText}" FontSize="11" Foreground="#B0B0C0"
+                       TextWrapping="Wrap" Margin="0,0,0,4"/>
+
         </StackPanel>
+        </ScrollViewer>
 
         <StackPanel Grid.Row="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,16,0,0">
             <Button Content="Save &amp; Close" Padding="16,6"

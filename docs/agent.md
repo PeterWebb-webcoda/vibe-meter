@@ -3,7 +3,8 @@
 `VibeMeter.Agent` is the headless sibling of the WPF app: every interval it
 collects usage from every provider, maps the reports onto the collection API's
 snapshot contract, and POSTs them — queueing snapshots for later whenever the
-API is unreachable.
+API is unreachable. A cycle is not the same thing as a row: the publish policy
+below decides which cycles are worth writing.
 
 ## Configuration (environment variables)
 
@@ -54,6 +55,41 @@ the cycle; the other machine's fresh reading then wins.
   400.
 - `not-configured`, `disabled`, and `error` reports keep their existing
   behaviour; gating only concerns data that is present but stale.
+
+## Publish policy (why a cycle can write no row)
+
+Collecting is cheap; a row in a DTU-constrained shared database is not. A host
+that refreshes for the sake of its own UI — the tray app defaults to every 60
+seconds — would otherwise write about **1,440 near-identical rows per user per
+day**. `VibeMeter.Publishing.PublishPolicy` decides, per cycle, whether the
+snapshot is worth sending:
+
+- **Content fingerprint.** A SHA-256 over the *mapped document with
+  `observedAt` excluded*, used only to answer "has anything actually changed".
+  It is never sent anywhere. The `Idempotency-Key` header is unchanged — it
+  still hashes the exact bytes, `observedAt` included, because a key that
+  ignored the timestamp would let two genuinely different documents collide on
+  one key and the API answers `CONFLICT` to a repeated key with a different
+  body.
+- **Minimum interval (4 min 50 s).** Never publish more often than this, *even
+  when the figures changed* — otherwise a provider whose percentage ticks every
+  cycle hands the cap straight back. Nothing is lost: the newer figures go out
+  on the first cycle after it elapses. Worst case ≈ 298 rows per day.
+- **Heartbeat (23 minutes).** Publish anyway when nothing has changed for this
+  long. Without it the stored `observedAt` decays into "when the numbers last
+  moved", and a machine that is switched off becomes indistinguishable from one
+  whose quota simply has not budged. Idle floor ≈ 62 rows per day.
+
+The decision is a pure function of (previous fingerprint, last publish time,
+current fingerprint, now), so it can be read and tested on its own. The two
+values it remembers live in a single `publish-policy.state` file inside the
+agent's offline-queue directory — the one path the publishing library is
+already given — so a service restart, a supervisor restarting a crash loop, or
+a scheduled `--once` does not publish afresh each time. Losing that file costs
+one extra row, never data.
+
+`--once` treats a policy skip as success (exit `0`): the run did its job and
+concluded the server already knows.
 
 ## Deployment
 

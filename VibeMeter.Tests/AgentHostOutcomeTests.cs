@@ -61,20 +61,40 @@ public sealed class AgentHostOutcomeTests : IDisposable
         Assert.Equal(0, _queue.Count);
     }
 
-    [Fact]
-    public async Task TransientAndAuthFailures_QueueTheSnapshotAndReturnQueuedForLater()
+    // One host per failure mode, each with its own queue directory (xUnit builds
+    // a fresh instance per case), rather than two hosts running seconds apart in
+    // one directory: the agent's publish policy keeps its state beside the queue,
+    // and two cycles of identical figures seconds apart is exactly what it is
+    // there to suppress. The claim under test is unchanged - a snapshot the API
+    // could not take is queued, and the cycle says so.
+    [Theory]
+    [InlineData(PublishOutcome.TransientFailure, 503)]
+    [InlineData(PublishOutcome.AuthFailure, 401)]
+    public async Task AFailureToSend_QueuesTheSnapshotAndReturnsQueuedForLater(PublishOutcome outcome, int statusCode)
     {
-        var queuedBefore = _queue.Count;
+        var host = CreateHost(new OutcomePublisher(outcome, statusCode), Live("codex"));
 
-        var transientHost = CreateHost(new OutcomePublisher(PublishOutcome.TransientFailure, 503), Live("codex"));
+        Assert.Equal(CycleOutcome.QueuedForLater, await host.RunOneCycleAsync(CancellationToken.None));
+        Assert.Equal(1, _queue.Count);
+    }
 
-        Assert.Equal(CycleOutcome.QueuedForLater, await transientHost.RunOneCycleAsync(CancellationToken.None));
-        Assert.Equal(queuedBefore + 1, _queue.Count);
+    [Fact]
+    public async Task IdenticalFigures_WriteOneRow_EvenAcrossARestart()
+    {
+        // The agent's reason for a file-backed policy state: a service manager,
+        // a supervisor after a crash, or a scheduled --once restarts this
+        // process on its own schedule, and a host that forgot its baseline each
+        // time would publish on every restart - out-writing the very loop the
+        // policy slows down.
+        Assert.Equal(CycleOutcome.Published, await CreateHost(Live("codex")).RunOneCycleAsync(CancellationToken.None));
+        Assert.Equal(CycleOutcome.SkippedByPolicy, await CreateHost(Live("codex")).RunOneCycleAsync(CancellationToken.None));
 
-        var authHost = CreateHost(new OutcomePublisher(PublishOutcome.AuthFailure, 401), Live("codex"));
+        // A brand-new host over the same queue directory stands in for the next
+        // run of the service.
+        var restarted = CreateHost(Live("codex"));
 
-        Assert.Equal(CycleOutcome.QueuedForLater, await authHost.RunOneCycleAsync(CancellationToken.None));
-        Assert.Equal(queuedBefore + 2, _queue.Count);
+        Assert.Equal(CycleOutcome.SkippedByPolicy, await restarted.RunOneCycleAsync(CancellationToken.None));
+        Assert.Single(_publisher.Documents);
     }
 
     [Fact]

@@ -19,6 +19,13 @@ public partial class MainViewModel : ObservableObject
     private readonly SettingsService _settingsService;
     private SettingsData _settings;
 
+    /// <summary>
+    /// Where each refresh's reports are sent, or null when the user has not
+    /// opted in to publishing (the default). Owned and replaced by
+    /// <see cref="App"/>, which holds the tray icon the sign-in prompt needs.
+    /// </summary>
+    private VibeMeter.Publishing.DesktopPublishHost? _publishHost;
+
     public ObservableCollection<ProviderViewModel> Providers { get; } = new();
 
     // --- Observable properties ---
@@ -91,10 +98,15 @@ public partial class MainViewModel : ObservableObject
         var enabled = Providers.Where(p => _settings.IsProviderEnabled(p.Id)).ToList();
 
         // Fetch every enabled provider in parallel; marshal results back to the UI thread.
+        // Each task also RETURNS its report, so the refresh has the whole cycle's readings
+        // in one place to hand to publishing. Task.WhenAll preserves the order of its input,
+        // so that list is always in registry order — which is not cosmetic: the publish
+        // policy compares a hash of the mapped document, provider order included, so a list
+        // whose order varied with fetch timing would read as new figures every single cycle.
         var tasks = enabled.Select(async card =>
         {
             var provider = _registry.Get(card.Id);
-            if (provider is null) return;
+            if (provider is null) return (ProviderUsage?)null;
 
             ProviderUsage usage;
             try
@@ -119,14 +131,18 @@ public partial class MainViewModel : ObservableObject
             }
 
             System.Windows.Application.Current?.Dispatcher.Invoke(() => card.Apply(usage));
+            return usage;
         });
 
-        await Task.WhenAll(tasks);
+        var collected = await Task.WhenAll(tasks);
 
         LastUpdated = DateTime.Now;
         IsLoading = false;
         StatusMessage = $"Updated {DateTime.Now:t}";
         UpdateFreshnessText();
+
+        // Deliberately the last thing, and deliberately NOT awaited — see PublishCollected.
+        PublishCollected(collected);
     }
 
     [RelayCommand]
@@ -220,7 +236,46 @@ public partial class MainViewModel : ObservableObject
         _settingsService.Save(_settings);
     }
 
+    /// <summary>
+    /// Points the refresh at a publish host, or at nothing. Called by
+    /// <see cref="App"/> at startup and again whenever the publishing settings
+    /// are saved, so switching the feature on takes effect without a restart.
+    /// </summary>
+    public void UsePublishHost(VibeMeter.Publishing.DesktopPublishHost? host) => _publishHost = host;
+
     // --- Private methods ---
+
+    /// <summary>
+    /// Hands one refresh's readings to publishing and returns immediately.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is called from a continuation on the UI thread — nothing in
+    /// <see cref="RefreshAsync"/> uses <c>ConfigureAwait(false)</c>, and the
+    /// refresh timer's Tick is an async-void handler — so it must not be
+    /// awaited and must not throw. <see cref="VibeMeter.Publishing.DesktopPublishHost.Publish"/>
+    /// guarantees both: it schedules the work onto the thread pool and swallows
+    /// everything that happens there. Awaiting it would freeze the window for
+    /// up to three 30-second HTTP attempts plus backoff, put the offline
+    /// queue's file writes on the dispatcher, and let a publish failure escape
+    /// through the async-void handler as an unhandled exception.
+    /// </para>
+    /// <para>
+    /// Providers the user has switched off are published EXPLICITLY as
+    /// disabled rather than left out. The collection API keeps the latest
+    /// reading per provider, so a provider that merely stops being mentioned
+    /// keeps its last reading for ever — the phone would go on showing a
+    /// switched-off provider's final percentage as though it were current. See
+    /// <see cref="VibeMeter.Publishing.ProviderRoster"/>.
+    /// </para>
+    /// </remarks>
+    private void PublishCollected(IReadOnlyList<ProviderUsage?> collected)
+    {
+        if (_publishHost is null) return;
+
+        var reported = collected.Where(usage => usage is not null).Select(usage => usage!).ToList();
+        _publishHost.Publish(VibeMeter.Publishing.ProviderRoster.IncludingDisabled(reported, _registry.Providers));
+    }
 
     private void ApplySettings(SettingsData settings)
     {

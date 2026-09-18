@@ -10,6 +10,9 @@ namespace VibeMeter.Agent;
 /// whenever the API cannot take it. No failure path is allowed to escape a
 /// cycle: a rogue provider, a dead network, or a full disk is logged and the
 /// process keeps running.
+/// A cycle is not the same thing as a row: the <see cref="PublishPolicy"/>
+/// below decides which cycles are worth writing, so a short interval costs
+/// provider fetches rather than database rows.
 /// </summary>
 public sealed class AgentHost
 {
@@ -34,7 +37,16 @@ public sealed class AgentHost
             new SnapshotComposer(mapper, config.StalenessThreshold, AgentPublishLog.Instance),
             publisher,
             queue,
-            AgentPublishLog.Instance);
+            AgentPublishLog.Instance,
+            // The state is FILE-backed here, not in memory, because this host is
+            // restarted by things other than a person: a service manager after
+            // an upgrade, a supervisor after a crash, a scheduled --once on its
+            // own timer. An in-memory policy would forget its baseline on every
+            // one of those and publish afresh, so a crash-looping agent would
+            // out-write the loop the policy exists to slow down. It lives in the
+            // offline-queue directory this host already owns - see
+            // FilePublishPolicyStore for why there and nowhere else.
+            new PublishPolicy(FilePublishPolicyStore.ForQueue(queue)));
     }
 
     /// <summary>

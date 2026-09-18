@@ -29,6 +29,14 @@ public enum CycleOutcome
 
     /// <summary>Collection, freshness or mapping failed, so no snapshot was produced.</summary>
     CollectionFailed,
+
+    /// <summary>
+    /// A snapshot was composed, but <see cref="PublishPolicy"/> judged it not
+    /// worth a row: either nothing had changed since the last publish and the
+    /// heartbeat was not due, or the minimum interval had not elapsed. A
+    /// success, not a failure — the figures are not lost, merely not repeated.
+    /// </summary>
+    SkippedByPolicy,
 }
 
 /// <summary>
@@ -40,6 +48,9 @@ public enum CycleOutcome
 /// enabled. Whatever produced the reports, this is the half that decides what
 /// reaches the collection API, and no failure path here is allowed to escape:
 /// a dead network or a full disk is logged and the caller carries on.
+/// A host given a <see cref="PublishPolicy"/> also gets "is this snapshot worth
+/// a row?" between composing and publishing — the rule itself lives in the
+/// policy, not here.
 /// </summary>
 public sealed class SnapshotPublishCycle
 {
@@ -47,17 +58,29 @@ public sealed class SnapshotPublishCycle
     private readonly ISnapshotPublisher _publisher;
     private readonly OfflineQueue _queue;
     private readonly IPublishLog _log;
+    private readonly PublishPolicy? _policy;
 
+    /// <param name="policy">
+    /// How often this host is allowed to write a row, or <see langword="null"/>
+    /// to publish every cycle. Null is the default because the cost of
+    /// publishing every cycle is entirely a function of how often the HOST
+    /// cycles: a host on a five-minute timer is already frugal, while one that
+    /// refreshes every 60 seconds for the sake of its UI needs the policy or it
+    /// writes about 1,440 near-identical rows a user a day. The decision the
+    /// policy applies lives in <see cref="PublishPolicy.Decide"/>, not here.
+    /// </param>
     public SnapshotPublishCycle(
         SnapshotComposer composer,
         ISnapshotPublisher publisher,
         OfflineQueue queue,
-        IPublishLog log)
+        IPublishLog log,
+        PublishPolicy? policy = null)
     {
         _composer = composer;
         _publisher = publisher;
         _queue = queue;
         _log = log;
+        _policy = policy;
     }
 
     /// <summary>
@@ -104,7 +127,44 @@ public sealed class SnapshotPublishCycle
             return CycleOutcome.NothingToPublish;
         }
 
+        // Worth a row at all? Asked AFTER composing, because the answer depends
+        // on the mapped document - what the freshness gate omitted is part of
+        // what changed - and BEFORE anything reaches the network or the queue.
+        // The composer's observedAt is the cycle's single "now", so the same
+        // instant judges the intervals and stamps the document.
+        string? fingerprint = null;
+        if (_policy is not null)
+        {
+            var (decision, current) = _policy.Evaluate(composed.Mapped, composed.ObservedAt);
+            if (!decision.ShouldPublish)
+            {
+                _log.Info(decision.Explanation);
+                return CycleOutcome.SkippedByPolicy;
+            }
+
+            fingerprint = current;
+
+            // A publish already announces itself below, so only the reasons an
+            // operator could not otherwise infer are worth a second line: a
+            // heartbeat (a row with nothing new in it looks like a bug until
+            // you know why it is there) and a clock that ran backwards.
+            if (decision.Reason is PublishReason.Heartbeat or PublishReason.ClockWentBackwards)
+            {
+                _log.Info(decision.Explanation);
+            }
+        }
+
         var result = await _publisher.PublishAsync(composed.Mapped.Json, cancellationToken);
+
+        // Recorded whatever became of the attempt: a queued snapshot is still
+        // delivered by a later flush, so re-sending these same figures next
+        // cycle under a fresh timestamp would put in a second row for one
+        // reading. See PublishPolicy.RecordPublished.
+        if (_policy is not null && fingerprint is not null)
+        {
+            _policy.RecordPublished(fingerprint, composed.ObservedAt);
+        }
+
         var rejected = false;
         switch (result.Outcome)
         {

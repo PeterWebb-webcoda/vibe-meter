@@ -33,6 +33,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\VibeMeter.Core\VibeMeter.Core.csproj" />
+    <!-- Opt-in publishing to the collection API, shared verbatim with the
+         headless agent. The library is deliberately platform-neutral (net10.0),
+         so referencing it costs this WPF app nothing but the MSAL dependency. -->
+    <ProjectReference Include="..\VibeMeter.Publishing\VibeMeter.Publishing.csproj" />
   </ItemGroup>
 
 </Project>

@@ -13,6 +13,7 @@ public partial class SettingsViewModel : ObservableObject
 {
     private readonly MainViewModel _mainViewModel;
     private readonly SettingsService _settingsService;
+    private readonly Action? _onSaved;
 
     [ObservableProperty] private bool _autoRefreshEnabled;
     [ObservableProperty] private int _refreshIntervalSeconds;
@@ -20,6 +21,21 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private bool _alwaysOnTop;
     [ObservableProperty] private bool _launchAtStartup;
     [ObservableProperty] private string _lastUpdatedText = "Not updated yet";
+
+    // --- Publishing to the collection API (opt-in, off by default) ---
+
+    [ObservableProperty] private bool _publishEnabled;
+    [ObservableProperty] private string _publishApiBaseUrl = "";
+    [ObservableProperty] private string _publishClientId = "";
+    [ObservableProperty] private string _publishTenantId = "";
+    [ObservableProperty] private string _publishScope = "";
+
+    /// <summary>
+    /// What publishing will do with the values as saved. Shown under the
+    /// section, because a half-filled configuration otherwise fails silently on
+    /// a background thread where nobody would look for it.
+    /// </summary>
+    [ObservableProperty] private string _publishStatusText = "";
 
     public ObservableCollection<ProviderToggle> ProviderToggles { get; } = new();
 
@@ -38,10 +54,16 @@ public partial class SettingsViewModel : ObservableObject
         new(MeterStyle.Battery, "Battery")
     };
 
-    public SettingsViewModel(MainViewModel mainViewModel, SettingsService settingsService)
+    /// <param name="onSaved">
+    /// Run after <see cref="Save"/> has written the file. The app uses it to
+    /// rebuild publishing, so switching the opt-in on or off takes effect
+    /// straight away instead of at the next launch.
+    /// </param>
+    public SettingsViewModel(MainViewModel mainViewModel, SettingsService settingsService, Action? onSaved = null)
     {
         _mainViewModel = mainViewModel;
         _settingsService = settingsService;
+        _onSaved = onSaved;
         LoadFromMainViewModel();
     }
 
@@ -54,6 +76,13 @@ public partial class SettingsViewModel : ObservableObject
 
         var settings = _settingsService.Load();
         LaunchAtStartup = settings.LaunchAtStartup;
+
+        PublishEnabled = settings.PublishEnabled;
+        PublishApiBaseUrl = settings.PublishApiBaseUrl;
+        PublishClientId = settings.PublishClientId;
+        PublishTenantId = settings.PublishTenantId;
+        PublishScope = settings.PublishScope;
+        UpdatePublishStatusText();
 
         ProviderToggles.Clear();
         foreach (var card in _mainViewModel.Providers)
@@ -94,6 +123,12 @@ public partial class SettingsViewModel : ObservableObject
         var settings = _settingsService.Load();
         settings.LaunchAtStartup = LaunchAtStartup;
 
+        settings.PublishEnabled = PublishEnabled;
+        settings.PublishApiBaseUrl = PublishApiBaseUrl?.Trim() ?? "";
+        settings.PublishClientId = PublishClientId?.Trim() ?? "";
+        settings.PublishTenantId = PublishTenantId?.Trim() ?? "";
+        settings.PublishScope = PublishScope?.Trim() ?? "";
+
         foreach (var toggle in ProviderToggles)
         {
             settings.ProviderEnabled[toggle.Id] = toggle.IsEnabled;
@@ -101,6 +136,31 @@ public partial class SettingsViewModel : ObservableObject
 
         _settingsService.Save(settings);
         UpdateStartupShortcut();
+        UpdatePublishStatusText();
+
+        // Rebuilds publishing against what was just written.
+        _onSaved?.Invoke();
+    }
+
+    /// <summary>
+    /// Describes what publishing will do, using the same validation the host
+    /// itself applies, so the window and the background thread can never
+    /// disagree about whether the settings are usable.
+    /// </summary>
+    private void UpdatePublishStatusText()
+    {
+        if (!PublishEnabled)
+        {
+            PublishStatusText = "Off — nothing leaves this machine.";
+            return;
+        }
+
+        var candidate = new VibeMeter.Publishing.DesktopPublishSettings(
+            PublishEnabled, PublishApiBaseUrl, PublishClientId, PublishTenantId, PublishScope);
+
+        PublishStatusText = candidate.TryResolve(out _, out var problems)
+            ? "On — each refresh publishes this machine's usage. You will be asked to sign in on the first publish."
+            : "Not publishing yet: " + string.Join("; ", problems) + ".";
     }
 
     [RelayCommand]
