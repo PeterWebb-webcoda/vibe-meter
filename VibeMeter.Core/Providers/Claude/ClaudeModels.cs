@@ -185,6 +185,51 @@ public class ClaudeOAuthAccount
     public bool? HasExtraUsageEnabled { get; set; }
 }
 
+// --- Raw DTOs for the OAuth credential written by the Claude Code CLI -----------------
+//
+// ~/.claude/.credentials.json holds the CLI's own sign-in under "claudeAiOauth". The same
+// file is also where several unrelated MCP servers keep their own OAuth entries, under
+// "mcpOAuth" keys. Only "claudeAiOauth" is bound below, deliberately: System.Text.Json
+// ignores members a model does not declare, so nothing else in that file is read, held in
+// memory, or written back. This code never writes the file at all.
+
+/// <summary>The credential file, narrowed to the one entry that is ours.</summary>
+public class ClaudeCredentialsFile
+{
+    [JsonPropertyName("claudeAiOauth")]
+    public ClaudeOAuthCredential? ClaudeAiOauth { get; set; }
+}
+
+/// <summary>
+/// The Claude Code CLI's OAuth entry.
+/// </summary>
+/// <remarks>
+/// The refresh token and its expiry are present in the file and are deliberately NOT
+/// declared here. This provider does not refresh — a lapsed sign-in is reported, not
+/// renewed — so there is no reason to pull a second, longer-lived secret into memory.
+/// </remarks>
+public class ClaudeOAuthCredential
+{
+    [JsonPropertyName("accessToken")]
+    public string? AccessToken { get; set; }
+
+    /// <summary>
+    /// Expiry, Unix epoch <b>milliseconds</b>. Reading it as seconds yields a date in
+    /// the year 56000 and a token that never appears to lapse; reading a seconds value as
+    /// milliseconds yields 1970 and a token that always does.
+    /// </summary>
+    [JsonPropertyName("expiresAt")]
+    public long? ExpiresAtUnixMilliseconds { get; set; }
+
+    /// <summary>The plan the subscription is on, e.g. "max" — stated, not inferred.</summary>
+    [JsonPropertyName("subscriptionType")]
+    public string? SubscriptionType { get; set; }
+
+    /// <summary>e.g. "default_claude_max_5x", the same shape as <c>userRateLimitTier</c>.</summary>
+    [JsonPropertyName("rateLimitTier")]
+    public string? RateLimitTier { get; set; }
+}
+
 /// <summary>Shared JSON parsing helpers for the Claude provider.</summary>
 internal static class ClaudeJson
 {

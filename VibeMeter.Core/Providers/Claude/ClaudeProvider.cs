@@ -11,18 +11,35 @@ namespace VibeMeter.Providers.Claude;
 /// Code's own <c>/usage</c> command displays.
 /// </summary>
 /// <remarks>
-/// Anthropic does not expose a documented public usage REST API for subscription plans;
-/// instead each Claude surface persists utilisation locally. Which file exists depends on
-/// how the user runs Claude, so path discovery is delegated to
-/// <see cref="ClaudeUsageSources"/> rather than assuming the CLI cache. No OAuth token
-/// handling or network call is required either way.
+/// <para>
+/// Three sources can supply those figures, and they are tried in that order of preference:
+/// Anthropic's usage endpoint fetched live, the Claude Code CLI's <c>usage_cache.json</c>,
+/// and the desktop app's sampled <c>plan-usage-history.json</c>.
+/// </para>
+/// <para>
+/// The live source was added because neither file is dependable. <c>usage_cache.json</c>
+/// is not maintained by Claude Code — it is written only on an explicit <c>/usage</c> or a
+/// limit-approaching warning, and was measured sitting untouched for over a day across
+/// 2h10m of continuous heavy use — while the desktop history samples at a 30-minute median
+/// against a 20-minute staleness gate, so it is stale more often than not. Reading files
+/// alone worked reliably on exactly one machine, and only because a personal statusline
+/// script happened to fetch usage and write the cache itself.
+/// </para>
+/// <para>
+/// Adding the live source takes nothing away: a machine with no credential, a lapsed one,
+/// or no network falls back to precisely the selection it made before.
+/// </para>
 /// </remarks>
 public sealed class ClaudeProvider : IUsageProvider
 {
     public string Id => "claude";
     public string DisplayName => "Claude Code";
 
+    /// <summary>What to run when the sign-in has lapsed or been refused.</summary>
+    private const string SignInCommand = "run `/login` in Claude Code";
+
     private readonly ClaudeAuth _auth;
+    private readonly Func<ClaudeApiClient> _clientFactory;
     private static Task<ClaudeCostDetailsData?>? _costTask;
     private static ClaudeCostDetailsData? _lastCostData;
 
@@ -39,7 +56,14 @@ public sealed class ClaudeProvider : IUsageProvider
     public ClaudeProvider() : this(new ClaudeAuth()) { }
 
     /// <summary>Testable constructor.</summary>
-    public ClaudeProvider(ClaudeAuth auth) => _auth = auth;
+    public ClaudeProvider(ClaudeAuth auth) : this(auth, () => new ClaudeApiClient()) { }
+
+    /// <summary>Testable constructor, with the transport supplied.</summary>
+    internal ClaudeProvider(ClaudeAuth auth, Func<ClaudeApiClient> clientFactory)
+    {
+        _auth = auth;
+        _clientFactory = clientFactory;
+    }
 
     public async Task<ProviderUsage> FetchAsync()
     {
@@ -63,13 +87,21 @@ public sealed class ClaudeProvider : IUsageProvider
             return Error(ex.Message);
         }
 
-        // 3. Read usage from the richest local surface that has any (NOT simply the most
-        //    recently written one - see ClaudeUsageSources.Merge for why that distinction
-        //    is the whole bug this selection was rewritten to fix).
-        var snapshot = await ClaudeUsageSources.ReadBestAsync();
+        // 3. Ask Anthropic directly. This is the only source whose freshness does not depend
+        //    on another program having run recently, so it outranks both files.
+        var live = await TryFetchLiveAsync(_auth, _clientFactory);
+
+        // 4. Merge with the local surfaces. The live reading wins when there is one;
+        //    otherwise the selection is exactly what it was before this source existed —
+        //    the richest local surface that has any figures, NOT simply the most recently
+        //    written one (see ClaudeUsageSources.Merge for why that distinction is the
+        //    whole bug that selection was rewritten to fix).
+        var snapshot = await ClaudeUsageSources.ReadBestAsync(live.Snapshot);
         if (snapshot is null)
         {
-            return NotConfigured(
+            // A lapsed sign-in with nothing on disk is a specific, fixable state, so say so
+            // rather than falling back to the generic "nothing written yet" advice.
+            return NotConfigured(live.Note ??
                 "Claude is installed but hasn't written any usage figures yet. " +
                 "Run Claude Code or open the Claude desktop app for a minute, then refresh. " +
                 $"Looked in: {string.Join(" and ", ClaudeUsageSources.CandidatePaths)}");
@@ -91,10 +123,18 @@ public sealed class ClaudeProvider : IUsageProvider
 
         ClaudeCostDetailsData? costData = _lastCostData;
 
-        // 4. Normalise into gauges.
+        // 5. Normalise into gauges.
         var gauges = BuildGauges(snapshot, costData, DisplayName);
 
-        string? planLabel = ClaudeAuth.FriendlyTier(account?.UserRateLimitTier);
+        // The tier from .claude.json stays first: it is the most specific thing available,
+        // distinguishing "Claude Max 5x" from "Claude Max 20x". The credential's own fields
+        // are additions below it, not a replacement — the credential states its tier in the
+        // same shape, and its subscriptionType says only "max". Together they give a plan
+        // label to desktop-only and freshly-signed-in machines that had none before.
+        string? planLabel =
+            ClaudeAuth.FriendlyTier(account?.UserRateLimitTier)
+            ?? ClaudeAuth.FriendlyTier(live.Credential?.RateLimitTier)
+            ?? ClaudeAuth.FriendlySubscription(live.Credential?.SubscriptionType);
         string? resetNote = null;
         if (snapshot.SevenDayResetAt is { } weeklyReset)
         {
@@ -102,17 +142,24 @@ public sealed class ClaudeProvider : IUsageProvider
             resetNote = $"Weekly reset: {qualifier}{weeklyReset:MMM d, h:mm tt}";
         }
 
-        // 5. Staleness heads-up — the figures are only as fresh as the last Claude refresh,
+        // 6. Staleness heads-up — the figures are only as fresh as the last Claude refresh,
         //    judged against the cadence of whichever surface supplied them. A sampled source
         //    is not at fault for being between samples, so the desktop history is allowed to
         //    miss several of its own 30-minute samples before we say anything; the CLI cache,
         //    which is rewritten on use and so has no cadence, keeps the flat six-hour rule.
+        //    A live reading is never stale: it was observed at this poll.
         var now = DateTime.Now;
         string? errorMessage = null;
         var age = now - snapshot.ObservedAt;
         if (!snapshot.IsCurrentAt(now))
         {
             errorMessage = $"Figures are {Math.Floor(age.TotalHours)}h old — open Claude to refresh.";
+
+            // Only here. A lapsed sign-in that costs the user nothing — because the files
+            // are current — is not worth an error on a working card; a lapsed sign-in that
+            // left them looking at day-old figures is exactly what they need told, because
+            // renewing it would have prevented this.
+            if (live.Note is not null) errorMessage += $" {live.Note}";
         }
 
         return new ProviderUsage
@@ -134,6 +181,71 @@ public sealed class ClaudeProvider : IUsageProvider
             // Two very different surfaces can land here. Say which one won, so a log line
             // about a stale or omitted Claude reading names the file it is talking about.
             SourceLabel = snapshot.SourceLabel,
+        };
+    }
+
+    /// <summary>
+    /// What one attempt at the live source produced.
+    /// </summary>
+    /// <param name="Snapshot">The live reading, or null when there was not one.</param>
+    /// <param name="Credential">
+    /// The credential that was read, for its plan fields. Null when there is no sign-in on
+    /// this machine.
+    /// </param>
+    /// <param name="Note">
+    /// A sentence explaining why the live source is unavailable and what fixes it, or null.
+    /// Deliberately null for a transient failure and for a machine that simply has no
+    /// Claude Code sign-in: neither is the user's to act on, and neither is a fault.
+    /// </param>
+    internal readonly record struct LiveUsageAttempt(
+        ClaudeUsageSnapshot? Snapshot,
+        ClaudeCredential? Credential,
+        string? Note);
+
+    /// <summary>
+    /// Reads the stored credential and, if it is usable, fetches usage live.
+    /// </summary>
+    /// <remarks>
+    /// Internal and static so the tests can drive it with a stubbed transport, without
+    /// depending on which Claude files the build agent happens to have.
+    /// </remarks>
+    internal static async Task<LiveUsageAttempt> TryFetchLiveAsync(
+        ClaudeAuth auth,
+        Func<ClaudeApiClient> clientFactory)
+    {
+        var credential = await auth.GetCredentialAsync();
+
+        // No sign-in here. Perfectly ordinary — a desktop-only user never has one — so the
+        // card says nothing and the local files carry the reading, exactly as before.
+        if (credential is null || !credential.HasToken)
+        {
+            return new LiveUsageAttempt(null, credential, null);
+        }
+
+        // A lapsed token earns an opaque 401, which reads as "Claude is broken" rather than
+        // "your sign-in lapsed". Do not spend a request finding that out.
+        if (credential.IsExpiredAt(DateTimeOffset.UtcNow))
+        {
+            var expiry = credential.ExpiresAt!.Value.ToLocalTime();
+            return new LiveUsageAttempt(null, credential,
+                $"Claude sign-in expired {expiry:yyyy-MM-dd} — {SignInCommand} on this PC to renew it.");
+        }
+
+        using var client = clientFactory();
+        var result = await client.GetUsageAsync(credential.AccessToken!);
+
+        return result.Outcome switch
+        {
+            ClaudeApiOutcome.Success => new LiveUsageAttempt(
+                // Observed now, because we asked now. That is the whole point of this source.
+                ClaudeUsageSources.FromLiveApi(result.Data, DateTime.Now), credential, null),
+
+            ClaudeApiOutcome.CredentialRejected => new LiveUsageAttempt(null, credential,
+                $"Claude sign-in was rejected — {SignInCommand} on this PC to renew it."),
+
+            // Transient: no network, a timeout, a 5xx. Nothing for the user to do, and the
+            // local files are there precisely for this. Stay quiet.
+            _ => new LiveUsageAttempt(null, credential, null),
         };
     }
 

@@ -14,24 +14,39 @@ namespace VibeMeter.Providers.Claude;
 internal enum ClaudeUsageSource
 {
     /// <summary>
-    /// The Claude Code CLI's <c>usage_cache.json</c>. Preferred unconditionally: it is the
-    /// only source carrying exact percentages, verbatim reset timestamps and model-scoped
-    /// weekly limits, and the CLI rewrites it on use rather than on a timer.
+    /// Anthropic's own usage endpoint, fetched over HTTP at the moment of the poll.
+    /// Preferred above everything else, because it is the only source that is fresh by
+    /// construction rather than by luck: it carries the same fields as the CLI cache, and
+    /// its observation time is the fetch itself.
     /// </summary>
-    CliCache = 0,
+    /// <remarks>
+    /// Both file sources describe a reading some other program chose to write. The CLI
+    /// cache is only rewritten on an explicit <c>/usage</c> or a limit-approaching warning
+    /// — measured on a Linux box, 2h10m of continuous heavy Claude Code use left it
+    /// untouched for over a day — and the desktop history samples at a 30-minute median.
+    /// Asking the API removes the dependency on either program having run recently.
+    /// </remarks>
+    LiveApi = 0,
+
+    /// <summary>
+    /// The Claude Code CLI's <c>usage_cache.json</c>. Preferred over every file source: it
+    /// is the only one carrying exact percentages, verbatim reset timestamps and
+    /// model-scoped weekly limits.
+    /// </summary>
+    CliCache = 1,
 
     /// <summary>
     /// A snapshot that did not declare its surface (only hand-built ones do). Ranked below
     /// the CLI cache — nothing lets us claim it is as rich — but above a source we know to
     /// be coarsely sampled.
     /// </summary>
-    Unknown = 1,
+    Unknown = 2,
 
     /// <summary>
     /// The Claude desktop app's <c>plan-usage-history.json</c>. The fallback: two
     /// percentages, no reset times, and a sampling cadence measured in tens of minutes.
     /// </summary>
-    DesktopHistory = 2,
+    DesktopHistory = 3,
 }
 
 /// <summary>
@@ -134,6 +149,7 @@ internal static class ClaudeUsageSources
 
     private const string CliSourceLabel = "Claude Code CLI cache";
     private const string DesktopSourceLabel = "Claude desktop app history";
+    internal const string LiveSourceLabel = "Anthropic usage API";
 
     /// <summary>Rolling-window lengths, used to project a reset from an observed drop.</summary>
     private static readonly TimeSpan FiveHourWindow = TimeSpan.FromHours(5);
@@ -175,19 +191,25 @@ internal static class ClaudeUsageSources
     public static IReadOnlyList<string> CandidatePaths => new[] { CliCachePath, DesktopHistoryPath };
 
     /// <summary>
-    /// The CLI's usage cache. Honours <c>CLAUDE_CONFIG_DIR</c>, which relocates the whole
-    /// <c>~/.claude</c> tree for users who keep it off the profile drive.
+    /// Resolves a file inside the Claude config directory, honouring <c>CLAUDE_CONFIG_DIR</c>
+    /// — which relocates the whole <c>~/.claude</c> tree for users who keep it off the
+    /// profile drive.
     /// </summary>
-    public static string CliCachePath
+    /// <remarks>
+    /// One helper rather than one rule per file. The usage cache and the OAuth credential
+    /// live side by side in that directory, so they must relocate together; two independent
+    /// copies of this rule would eventually disagree.
+    /// </remarks>
+    internal static string ConfigFile(string fileName)
     {
-        get
-        {
-            var configDir = Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR");
-            return string.IsNullOrWhiteSpace(configDir)
-                ? Path.Combine(HomePath, ".claude", "usage_cache.json")
-                : Path.Combine(configDir.Trim(), "usage_cache.json");
-        }
+        var configDir = Environment.GetEnvironmentVariable("CLAUDE_CONFIG_DIR");
+        return string.IsNullOrWhiteSpace(configDir)
+            ? Path.Combine(HomePath, ".claude", fileName)
+            : Path.Combine(configDir.Trim(), fileName);
     }
+
+    /// <summary>The CLI's usage cache.</summary>
+    public static string CliCachePath => ConfigFile("usage_cache.json");
 
     /// <summary>
     /// The desktop app's sampled plan-usage history.
@@ -211,7 +233,20 @@ internal static class ClaudeUsageSources
     /// exists or none could be parsed.
     /// </summary>
     public static Task<ClaudeUsageSnapshot?> ReadBestAsync() =>
-        ReadBestAsync(CliCachePath, DesktopHistoryPath);
+        ReadBestAsync(live: null);
+
+    /// <summary>
+    /// Merges an already-fetched live reading with whatever the local files hold. The live
+    /// reading outranks both files and so wins whenever it is present; pass null when there
+    /// was no credential, the credential had lapsed, or the call did not succeed, and the
+    /// selection falls back to exactly what it chose before this source existed.
+    /// </summary>
+    /// <remarks>
+    /// The fetch itself belongs to the provider, which owns the credential and the
+    /// user-facing wording for a lapsed sign-in. This class stays a merger of readings.
+    /// </remarks>
+    public static Task<ClaudeUsageSnapshot?> ReadBestAsync(ClaudeUsageSnapshot? live) =>
+        ReadBestAsync(live, CliCachePath, DesktopHistoryPath);
 
     /// <summary>
     /// Reads a named pair of files rather than the ones this machine happens to have.
@@ -220,12 +255,23 @@ internal static class ClaudeUsageSources
     /// Claude install on the build agent; production always calls the parameterless
     /// overload.
     /// </summary>
+    internal static Task<ClaudeUsageSnapshot?> ReadBestAsync(
+        string? cliCachePath,
+        string? desktopHistoryPath) =>
+        ReadBestAsync(live: null, cliCachePath, desktopHistoryPath);
+
+    /// <summary>
+    /// The full selection: an optional live reading plus a named pair of files.
+    /// </summary>
     internal static async Task<ClaudeUsageSnapshot?> ReadBestAsync(
+        ClaudeUsageSnapshot? live,
         string? cliCachePath,
         string? desktopHistoryPath)
     {
         var snapshots = new List<ClaudeUsageSnapshot>();
 
+        if (live is not null)
+            snapshots.Add(live);
         if (cliCachePath is not null && await ReadCliCacheAsync(cliCachePath) is { } cli)
             snapshots.Add(cli);
         if (desktopHistoryPath is not null && await ReadDesktopHistoryAsync(desktopHistoryPath) is { } desktop)
@@ -233,6 +279,48 @@ internal static class ClaudeUsageSources
 
         return Merge(snapshots);
     }
+
+    // --- Source 0: Anthropic's usage endpoint --------------------------------------------
+
+    /// <summary>
+    /// Wraps a usage payload fetched live into a snapshot, or returns null when the payload
+    /// was absent.
+    /// </summary>
+    /// <param name="data">The deserialised response. It is the same shape as the CLI
+    /// cache's <c>data</c> member, because that cache stores the response verbatim.</param>
+    /// <param name="observedAt">
+    /// The moment of the fetch. A live reading observes the value now — which is precisely
+    /// why this source fixes the staleness problem the file sources have.
+    /// </param>
+    internal static ClaudeUsageSnapshot? FromLiveApi(ClaudeUsageData? data, DateTime observedAt)
+    {
+        if (data is null) return null;
+
+        return new ClaudeUsageSnapshot(
+            ObservedAt: observedAt,
+            SourceLabel: LiveSourceLabel,
+            SourcePath: ClaudeApiClient.UsageUrl,
+            Source: ClaudeUsageSource.LiveApi,
+
+            // Not a sampled source: we asked, and it answered. There is no cadence to be
+            // between, so its age is simply its age.
+            SamplingInterval: null,
+            FiveHourPercentUsed: data.FiveHour?.UsedPercent,
+            FiveHourResetAt: data.FiveHour?.ResetAt,
+            SevenDayPercentUsed: data.SevenDay?.UsedPercent,
+            SevenDayResetAt: data.SevenDay?.ResetAt,
+            ScopedLimits: ScopedLimitsOf(data),
+            ResetTimesAreApproximate: false);
+    }
+
+    /// <summary>
+    /// The model-scoped weekly limits worth painting a gauge for — those that name the
+    /// model they apply to.
+    /// </summary>
+    private static List<ClaudeUsageLimit> ScopedLimitsOf(ClaudeUsageData data) =>
+        data.Limits?
+            .Where(l => l.Kind == "weekly_scoped" && !string.IsNullOrWhiteSpace(l.Scope?.Model?.DisplayName))
+            .ToList() ?? new List<ClaudeUsageLimit>();
 
     /// <summary>
     /// Picks the best snapshot by SOURCE, not by recency, and backfills reset times it is
@@ -243,10 +331,11 @@ internal static class ClaudeUsageSources
     /// <para>
     /// <b>The rule.</b> Discard any snapshot with no usage figures; of what remains, take
     /// the one whose <see cref="ClaudeUsageSnapshot.Source"/> ranks highest
-    /// (<see cref="ClaudeUsageSource.CliCache"/> first), breaking a tie within one source by
-    /// recency. So the CLI cache wins whenever it is usable at all, even against a newer
-    /// desktop sample, and the desktop history is used only when the CLI cache is absent,
-    /// unreadable, or carries no figures.
+    /// (<see cref="ClaudeUsageSource.LiveApi"/> first, then
+    /// <see cref="ClaudeUsageSource.CliCache"/>), breaking a tie within one source by
+    /// recency. So a live reading wins whenever one could be fetched; failing that the CLI
+    /// cache wins whenever it is usable at all, even against a newer desktop sample; and the
+    /// desktop history is used only when both are absent, unreadable, or carry no figures.
     /// </para>
     /// <para>
     /// <b>Why not recency.</b> Ordering purely by <c>ObservedAt</c> cannot express what this
@@ -322,10 +411,6 @@ internal static class ClaudeUsageSources
         var data = cache?.Data;
         if (data is null) return null;
 
-        var scoped = data.Limits?
-            .Where(l => l.Kind == "weekly_scoped" && !string.IsNullOrWhiteSpace(l.Scope?.Model?.DisplayName))
-            .ToList() ?? new List<ClaudeUsageLimit>();
-
         return new ClaudeUsageSnapshot(
             ObservedAt: ClaudeJson.ParseIso(cache?.Timestamp) ?? File.GetLastWriteTime(path),
             SourceLabel: CliSourceLabel,
@@ -339,7 +424,7 @@ internal static class ClaudeUsageSources
             FiveHourResetAt: data.FiveHour?.ResetAt,
             SevenDayPercentUsed: data.SevenDay?.UsedPercent,
             SevenDayResetAt: data.SevenDay?.ResetAt,
-            ScopedLimits: scoped,
+            ScopedLimits: ScopedLimitsOf(data),
             ResetTimesAreApproximate: false);
     }
 
