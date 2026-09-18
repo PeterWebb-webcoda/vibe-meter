@@ -5,9 +5,10 @@ namespace VibeMeter.Publishing;
 
 /// <summary>
 /// Where <see cref="PublishPolicy"/> keeps the two values it remembers between
-/// cycles. A seam, not a file, because the two hosts want different answers:
-/// the headless agent must survive a service restart, while the tray app must
-/// not acquire a file of its own to manage.
+/// cycles. A seam, not a file, so a test can drive the policy without a disk —
+/// both hosts persist their state, because state that does not outlive the
+/// object holding it is not a floor at all (see
+/// <see cref="DesktopPublishHost.CreatePolicyFor"/>).
 /// </summary>
 /// <remarks>
 /// Every implementation must FAIL OPEN. A store that cannot be read returns
@@ -26,11 +27,20 @@ public interface IPublishPolicyStore
 }
 
 /// <summary>
-/// Keeps the state in memory only, so a host that restarts publishes
-/// immediately. The right default for an interactive host: a tray app restart
-/// is a person launching it, and publishing once at launch is both cheap and
-/// what they would expect.
+/// Keeps the state in memory only, so anything that replaces the object holding
+/// it starts from a blank baseline.
 /// </summary>
+/// <remarks>
+/// For tests and for a one-shot process that genuinely has nowhere to write —
+/// NOT for a long-running host. A host whose state is forgotten reads back
+/// "nothing published yet" and publishes whatever the minimum interval says,
+/// which is how the tray app came to write three rows inside two minutes against
+/// a 290-second floor: its host, and with it this store, was rebuilt every time
+/// the settings were saved. "A restart should publish" is a real requirement,
+/// but it belongs in the policy as one bounded allowance — see
+/// <c>publishOnStart</c> on <see cref="PublishPolicy"/> — not in an amnesiac
+/// store that grants it again on every rebuild.
+/// </remarks>
 public sealed class InMemoryPublishPolicyStore : IPublishPolicyStore
 {
     private PublishPolicyState _state = PublishPolicyState.None;

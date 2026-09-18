@@ -17,7 +17,15 @@ public class ProviderRegistry
 {
     public IReadOnlyList<IUsageProvider> Providers { get; }
 
-    public ProviderRegistry()
+    /// <param name="googleAccounts">
+    /// Where the Google provider finds the accounts THIS host has configured.
+    /// The app passes a settings-backed source; omitting it leaves the provider
+    /// with only the auto-detected Antigravity account, which is what the
+    /// headless agent wants and what the tray app must never do — a tray
+    /// provider with no account source reports "not configured" for an account
+    /// that is sitting in settings.json, and publishes that answer.
+    /// </param>
+    public ProviderRegistry(IGoogleAccountSource? googleAccounts = null)
     {
         Providers = new List<IUsageProvider>
         {
@@ -28,7 +36,7 @@ public class ProviderRegistry
             // backend (cloudcode-pa.googleapis.com), authed with the OAuth refresh token
             // the Gemini CLI / Antigravity store in ~/.gemini/oauth_creds.json. See
             // docs/provider-research.md for the full API investigation.
-            new GoogleProvider()
+            new GoogleProvider(googleAccounts ?? EmptyGoogleAccountSource.Instance)
         };
     }
 

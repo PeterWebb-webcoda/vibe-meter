@@ -34,7 +34,11 @@ public partial class App : Application
 
         // Services
         _settingsService = new SettingsService();
-        _registry = new ProviderRegistry();
+
+        // The Google provider is given THIS host's account source, so the
+        // reading it publishes is built from the same settings file the card
+        // shows. See SettingsGoogleAccountSource.
+        _registry = new ProviderRegistry(new SettingsGoogleAccountSource(_settingsService));
 
         // ViewModels
         _mainViewModel = new MainViewModel(_registry, _settingsService);

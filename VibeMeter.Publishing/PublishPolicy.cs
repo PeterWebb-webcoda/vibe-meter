@@ -17,6 +17,14 @@ public enum PublishReason
     Heartbeat,
 
     /// <summary>
+    /// Nothing changed and the heartbeat is not due, but this host has started
+    /// (or been rebuilt) since its last row and has not spent its one startup
+    /// publish yet — see <c>publishOnStart</c> on
+    /// <see cref="PublishPolicy(IPublishPolicyStore, PublishPolicyOptions?, bool)"/>.
+    /// </summary>
+    HostRestarted,
+
+    /// <summary>
     /// The recorded publish time is in the future: the clock moved backwards,
     /// or the state came from a machine whose clock was ahead. Publishing is
     /// the safe answer — see <see cref="PublishPolicy.Decide"/>.
@@ -177,10 +185,41 @@ public sealed class PublishPolicy
 {
     private readonly IPublishPolicyStore _store;
 
-    public PublishPolicy(IPublishPolicyStore store, PublishPolicyOptions? options = null)
+    /// <summary>
+    /// The unspent startup publish. Volatile because a host may consult the
+    /// policy from a different thread-pool thread each cycle; the cycles
+    /// themselves never overlap (the desktop host declines a refresh that
+    /// arrives mid-publish, and the agent awaits each cycle), so a flag is
+    /// enough and no lock is warranted.
+    /// </summary>
+    private volatile bool _restartPending;
+
+    /// <param name="publishOnStart">
+    /// Whether this host may spend ONE publish on having started, for figures
+    /// that are otherwise unchanged and not yet due a heartbeat.
+    /// <para>
+    /// True for the desktop host: it is started and rebuilt by a person, and a
+    /// relaunch that said nothing for up to a heartbeat (23 minutes) would look
+    /// broken to whoever just switched publishing on. The allowance is spent
+    /// once, by <see cref="RecordPublished"/>, and it is granted BELOW the
+    /// minimum interval, not above it — a restart inside the floor waits for
+    /// the floor rather than buying a row, which is what stops a run of
+    /// restarts (or of saved settings) from writing a row apiece.
+    /// </para>
+    /// <para>
+    /// False for the headless agent, which is restarted by service managers and
+    /// supervisors: a crash loop must not turn into a write loop, and the agent
+    /// keeps a persistent baseline precisely so a restart is invisible.
+    /// </para>
+    /// </param>
+    public PublishPolicy(
+        IPublishPolicyStore store,
+        PublishPolicyOptions? options = null,
+        bool publishOnStart = false)
     {
         _store = store;
         Options = (options ?? PublishPolicyOptions.Default).Validated();
+        _restartPending = publishOnStart;
     }
 
     public PublishPolicyOptions Options { get; }
@@ -197,11 +236,22 @@ public sealed class PublishPolicy
     /// percentage ticks every cycle;</item>
     /// <item>the heartbeat is due — publish whatever the content says;</item>
     /// <item>the content changed — publish;</item>
+    /// <item>this host has started since its last row and has not spent its
+    /// startup publish — publish (see <paramref name="restartPending"/>);</item>
     /// <item>otherwise — skip.</item>
     /// </list>
     /// Nothing is lost by skipping a change inside the floor: the next cycle
     /// re-reads the providers, so the NEWER figures are published a moment
     /// later. The policy delays a reading; it never drops one.
+    /// <para>
+    /// The startup publish sits BELOW the minimum interval on purpose. A host
+    /// that has just started has a real claim to make — it may have been off for
+    /// a week — but it has no claim to make it NOW, and a host that is rebuilt
+    /// every time its settings are saved would otherwise write a row per save.
+    /// Below the floor, the allowance survives until the floor lets it through,
+    /// so a restart is never silently swallowed and never costs more than one
+    /// row per minimum interval.
+    /// </para>
     /// <para>
     /// A recorded time in the future can only mean the clock moved backwards
     /// (a correction, a VM resume, a state file written by a machine running
@@ -211,11 +261,16 @@ public sealed class PublishPolicy
     /// rewrites the recorded time to something sane and costs a single row.
     /// </para>
     /// </summary>
+    /// <param name="restartPending">
+    /// Whether this host has started since its last recorded row and still has
+    /// its one startup publish to spend. Ignored inside the minimum interval.
+    /// </param>
     public static PublishDecision Decide(
         PublishPolicyState previous,
         string currentFingerprint,
         DateTimeOffset now,
-        PublishPolicyOptions options)
+        PublishPolicyOptions options,
+        bool restartPending = false)
     {
         if (previous.LastPublishedAt is not { } lastPublishedAt || previous.Fingerprint is null)
         {
@@ -246,7 +301,9 @@ public sealed class PublishPolicy
                 $"{Describe(options.MinimumInterval)} minimum" +
                 (changed
                     ? " - the changed figures go out on the first cycle after the minimum elapses."
-                    : " and nothing has changed."));
+                    : restartPending
+                        ? " - this host has restarted, and its one startup publish goes out on the first cycle after the minimum elapses."
+                        : " and nothing has changed."));
         }
 
         if (elapsed >= options.HeartbeatInterval)
@@ -261,16 +318,29 @@ public sealed class PublishPolicy
                       "meaning \"this machine is still reporting\" rather than \"this machine may be off\".");
         }
 
-        return changed
-            ? new PublishDecision(
+        if (changed)
+        {
+            return new PublishDecision(
                 true,
                 PublishReason.ContentChanged,
-                $"Publishing: the figures changed and {Describe(elapsed)} has passed since the last publish.")
-            : new PublishDecision(
-                false,
-                PublishReason.Unchanged,
-                $"Not publishing: identical figures {Describe(elapsed)} on, and the " +
-                $"{Describe(options.HeartbeatInterval)} heartbeat is not due.");
+                $"Publishing: the figures changed and {Describe(elapsed)} has passed since the last publish.");
+        }
+
+        if (restartPending)
+        {
+            return new PublishDecision(
+                true,
+                PublishReason.HostRestarted,
+                $"Publishing: this host has started since its last row {Describe(elapsed)} ago. Nothing has " +
+                "changed, but a relaunch is worth saying so once rather than staying silent until the " +
+                $"{Describe(options.HeartbeatInterval)} heartbeat.");
+        }
+
+        return new PublishDecision(
+            false,
+            PublishReason.Unchanged,
+            $"Not publishing: identical figures {Describe(elapsed)} on, and the " +
+            $"{Describe(options.HeartbeatInterval)} heartbeat is not due.");
     }
 
     /// <summary>
@@ -282,7 +352,7 @@ public sealed class PublishPolicy
     public (PublishDecision Decision, string Fingerprint) Evaluate(MappedSnapshot snapshot, DateTimeOffset now)
     {
         var fingerprint = ContentFingerprint.For(snapshot);
-        return (Decide(_store.Read(), fingerprint, now, Options), fingerprint);
+        return (Decide(_store.Read(), fingerprint, now, Options, _restartPending), fingerprint);
     }
 
     /// <summary>
@@ -293,9 +363,17 @@ public sealed class PublishPolicy
     /// re-sending the same figures under a new timestamp and putting two rows in
     /// for one reading. The heartbeat bounds the cost if that document is
     /// eventually discarded — at worst one heartbeat of silence, not permanent.
+    /// <para>
+    /// This is also where the startup publish is spent, whichever rule actually
+    /// let the row through: a host that has said something since it started has
+    /// nothing left to say about having started.
+    /// </para>
     /// </summary>
-    public void RecordPublished(string fingerprint, DateTimeOffset publishedAt) =>
+    public void RecordPublished(string fingerprint, DateTimeOffset publishedAt)
+    {
+        _restartPending = false;
         _store.Write(new PublishPolicyState(fingerprint, publishedAt));
+    }
 
     private static string Describe(TimeSpan span) =>
         span.TotalHours >= 1 ? $"{span.TotalHours:0.#}h"

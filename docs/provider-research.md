@@ -184,6 +184,41 @@ search/tools. `level` → plan label (e.g. "GLM Coding — Lite").
 `ZAI_API_KEY` env var (canonical), `ANTHROPIC_AUTH_TOKEN` fallback, or
 `~/.zai/user-settings.json` for the dedicated CLI. See `.env.example`.
 
+### VibeMeter's own copy of the refresh token
+Accounts added through Settings -> "Add Google account" belong to VibeMeter rather than to
+Antigravity, so VibeMeter has to keep their refresh token itself. It lives in
+`%APPDATA%\VibeMeter\settings.json`, and it is **protected with Windows DPAPI under the
+CurrentUser scope** before it gets there:
+
+```jsonc
+"GoogleAccounts": [
+  { "Email": "someone@example.com", "ProtectedRefreshToken": "AQAAANCMnd8B…" }
+]
+```
+
+Builds up to 0.5.1 wrote a `"RefreshToken"` property holding the `1//…` value in the
+clear. A Google refresh token is long-lived and does not expire on its own, and
+settings.json is the file people paste into bug reports, so `SettingsService.Load`
+migrates any it finds: the token is re-stored protected and the file is written back
+immediately, which is what removes the plaintext from disk. See
+`VibeMeter.Core/Providers/Google/GoogleAccountProtection.cs`.
+
+DPAPI's key is held by Windows against the user's logon credential, so the stored value
+opens only for that Windows account on that machine. When it cannot be opened — a roamed
+profile, a restored backup — the account is marked as needing to be added again and is
+left out of the carousel roster. There is deliberately no plaintext fallback: reinstating
+one on exactly the machines where protection fails would reintroduce the defect.
+
+### Where a host's configured accounts come from
+`GoogleProvider` asks an `IGoogleAccountSource` on every fetch. The tray app passes
+`SettingsGoogleAccountSource` (backed by its settings file); the headless agent passes
+nothing and relies on the auto-detected Antigravity account. This used to be a
+process-wide `static` that only the WPF view model's constructor assigned, which made the
+roster a property of the *process* rather than of the host — a host that never assigned it
+reported `NotConfigured` for an account sitting in settings.json, and the tray app
+publishes the same reading it shows, so that answer reached the collection API and masked
+a good reading from a host that had read the account correctly.
+
 ### Why this is safe to call (unlike probing the inference endpoint)
 This is a read-only `GET` against the monitor surface using the user's own API key —
 not an inference call through an unsupported tool. Z.ai's risk-control warnings apply

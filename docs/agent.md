@@ -79,14 +79,29 @@ snapshot is worth sending:
   long. Without it the stored `observedAt` decays into "when the numbers last
   moved", and a machine that is switched off becomes indistinguishable from one
   whose quota simply has not budged. Idle floor ≈ 62 rows per day.
+- **One startup publish (desktop host only).** The tray app may spend a single
+  publish on having started, so a relaunch is not silent for up to a heartbeat.
+  It is granted *below* the minimum interval, never above it: a host that starts
+  inside the floor waits for the floor rather than buying a row, and the
+  allowance is spent the first time anything is published. The agent does not
+  get one — it is restarted by service managers and supervisors, and a crash
+  loop must not become a write loop.
 
 The decision is a pure function of (previous fingerprint, last publish time,
-current fingerprint, now), so it can be read and tested on its own. The two
-values it remembers live in a single `publish-policy.state` file inside the
-agent's offline-queue directory — the one path the publishing library is
-already given — so a service restart, a supervisor restarting a crash loop, or
-a scheduled `--once` does not publish afresh each time. Losing that file costs
-one extra row, never data.
+current fingerprint, now, startup publish unspent), so it can be read and
+tested on its own. The two values it remembers live in a single
+`publish-policy.state` file inside the host's offline-queue directory — the one
+path the publishing library is already given — so a service restart, a
+supervisor restarting a crash loop, a scheduled `--once`, or the tray app
+rebuilding its publish host when its settings are saved does not publish afresh
+each time. Losing that file costs one extra row, never data.
+
+Both hosts persist that state. The tray app originally kept it in memory, on
+the reasoning that a relaunch is a person and one row is cheap — but its host is
+rebuilt at startup *and on every saved setting*, so each rebuild read back
+"nothing published yet" and published regardless of the floor. Observed in
+production as four rows inside five minutes against a 290-second minimum. The
+startup publish above is that requirement done as a bounded rule instead.
 
 `--once` treats a policy skip as success (exit `0`): the run did its job and
 concluded the server already knows.

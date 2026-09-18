@@ -14,6 +14,10 @@
          default (2.1.x) bundles a vulnerable SQLite. We only run a single read-only
          SELECT, so the practical risk is nil, but a clean build is better. -->
     <PackageReference Include="SQLitePCLRaw.lib.e_sqlite3" Version="3.50.3" />
+    <!-- Windows DPAPI (CurrentUser) for the Google refresh token at rest; see
+         VibeMeter.Core/Security/DpapiSecretProtector.cs. ProtectedData is not in
+         the base class library on .NET, only in this package. -->
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="9.0.10" />
   </ItemGroup>
 
 </Project>

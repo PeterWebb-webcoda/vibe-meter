@@ -32,12 +32,7 @@ public sealed class GoogleProvider : IUsageProvider
     public string DisplayName => "Google AI Pro";
 
     private readonly GoogleAuth _auth;
-
-    /// <summary>
-    /// Accounts explicitly added through VibeMeter's OAuth flow, set by the view model from
-    /// settings. Static so the value survives provider re-instantiation each refresh cycle.
-    /// </summary>
-    public static List<GoogleAccount> ConfiguredAccounts { get; set; } = new();
+    private readonly IGoogleAccountSource _configuredAccounts;
 
     /// <summary>
     /// The full carousel roster (auto-detected Antigravity account + configured accounts),
@@ -63,11 +58,24 @@ public sealed class GoogleProvider : IUsageProvider
     private static readonly Dictionary<string, string> AutoDetectedEmailCache
         = new(StringComparer.Ordinal);
 
-    /// <summary>Production constructor.</summary>
-    public GoogleProvider() : this(new GoogleAuth()) { }
+    /// <summary>
+    /// Constructor for a host that configures no accounts of its own — the
+    /// headless agent, which relies entirely on the auto-detected Antigravity
+    /// account. A host that DOES hold accounts (the tray app) must pass its own
+    /// <see cref="IGoogleAccountSource"/>, or the roster will not contain them.
+    /// </summary>
+    public GoogleProvider() : this(new GoogleAuth(), EmptyGoogleAccountSource.Instance) { }
+
+    /// <summary>Production constructor for a host with configured accounts.</summary>
+    public GoogleProvider(IGoogleAccountSource configuredAccounts)
+        : this(new GoogleAuth(), configuredAccounts) { }
 
     /// <summary>Testable constructor.</summary>
-    public GoogleProvider(GoogleAuth auth) => _auth = auth;
+    public GoogleProvider(GoogleAuth auth, IGoogleAccountSource? configuredAccounts = null)
+    {
+        _auth = auth;
+        _configuredAccounts = configuredAccounts ?? EmptyGoogleAccountSource.Instance;
+    }
 
     /// <summary>Advances to the next account in the carousel (wraps). No-op below 2 accounts.</summary>
     public static void CycleNextAccount() => Step(+1);
@@ -252,10 +260,13 @@ public sealed class GoogleProvider : IUsageProvider
     /// de-duped by email. A configured entry wins over the auto-detected one for the same
     /// email, because its token was minted with VibeMeter's own consent.
     /// </summary>
-    private async Task<List<GoogleAccount>> ResolveRosterAsync()
+    internal async Task<List<GoogleAccount>> ResolveRosterAsync()
     {
-        var configured = ConfiguredAccounts
-            .Where(a => !string.IsNullOrWhiteSpace(a.RefreshToken))
+        // An account whose stored token could not be opened on this machine has
+        // no usable RefreshToken and is skipped here, so the carousel never
+        // offers an entry that can only fail — see GoogleAccountProtection.
+        var configured = _configuredAccounts.GetConfiguredAccounts()
+            .Where(a => a is not null && !string.IsNullOrWhiteSpace(a.RefreshToken))
             .ToList();
 
         var roster = new List<GoogleAccount>();

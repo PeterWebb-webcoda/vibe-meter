@@ -43,8 +43,15 @@ namespace VibeMeter.Providers.Google;
 /// Account identity (non-secret) comes from
 /// <c>%USERPROFILE%\.gemini\google_accounts.json</c>.
 /// </para>
+/// <para>
+/// Not sealed, and the three methods that reach outside the process are
+/// <see langword="virtual"/>, so a test can stand in for the local Antigravity
+/// install and for the token endpoint. Everything this class does touches
+/// either a live credential store or the network, which is exactly what a test
+/// of the provider around it must not do.
+/// </para>
 /// </remarks>
-public sealed class GoogleAuth
+public class GoogleAuth
 {
     private static readonly string HomePath =
         Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
@@ -125,7 +132,7 @@ public sealed class GoogleAuth
     /// Reads the OAuth refresh token from Antigravity's state database. Returns null when
     /// Antigravity is absent, not signed in, or the token blob is malformed.
     /// </summary>
-    public string? GetRefreshToken()
+    public virtual string? GetRefreshToken()
     {
         if (!File.Exists(StateDbPath)) return null;
 
@@ -208,7 +215,7 @@ public sealed class GoogleAuth
     }
 
     /// <summary>The signed-in Google account email, or null when not available.</summary>
-    public async Task<string?> GetAccountEmailAsync()
+    public virtual async Task<string?> GetAccountEmailAsync()
     {
         if (!File.Exists(AccountsFilePath)) return null;
 
@@ -255,7 +262,7 @@ public sealed class GoogleAuth
     /// Uses a per-refresh-token cache so multiple accounts don't evict each other. Throws
     /// on auth failure (the provider converts this to an Error state).
     /// </summary>
-    public async Task<string> GetAccessTokenForAccountAsync(
+    public virtual async Task<string> GetAccessTokenForAccountAsync(
         string refreshToken, CancellationToken ct = default)
     {
         var now = DateTimeOffset.UtcNow;

@@ -219,8 +219,11 @@ public sealed class PublishPolicyStoreTests : IDisposable
         var store = new InMemoryPublishPolicyStore();
         store.Write(new PublishPolicyState("f1-abc", DateTimeOffset.UtcNow));
 
-        // Stated as a test because it is a choice, not an omission: an
-        // interactive host that the user has just relaunched should publish.
+        // Stated as a test because it is what makes this store unfit for a
+        // long-running host: whatever replaces the object reads back "nothing
+        // published yet" and publishes regardless of the floor. "A relaunch
+        // should publish" is a real requirement, and it lives in the policy as
+        // one bounded allowance instead - see PublishPolicyRestartTests.
         Assert.Equal(PublishPolicyState.None, new InMemoryPublishPolicyStore().Read());
         Assert.NotEqual(PublishPolicyState.None, store.Read());
     }

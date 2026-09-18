@@ -146,9 +146,12 @@ public sealed class SnapshotPublishCycle
 
             // A publish already announces itself below, so only the reasons an
             // operator could not otherwise infer are worth a second line: a
-            // heartbeat (a row with nothing new in it looks like a bug until
-            // you know why it is there) and a clock that ran backwards.
-            if (decision.Reason is PublishReason.Heartbeat or PublishReason.ClockWentBackwards)
+            // heartbeat and a restart (a row with nothing new in it looks like a
+            // bug until you know why it is there) and a clock that ran
+            // backwards.
+            if (decision.Reason is PublishReason.Heartbeat
+                or PublishReason.HostRestarted
+                or PublishReason.ClockWentBackwards)
             {
                 _log.Info(decision.Explanation);
             }

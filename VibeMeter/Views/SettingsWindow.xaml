@@ -13,6 +13,8 @@
         FontFamily="Segoe UI">
 
     <Window.Resources>
+        <!-- Hides the per-account note unless an account actually has one. -->
+        <BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter"/>
         <Style TargetType="TextBlock">
             <Setter Property="Foreground" Value="White"/>
         </Style>
@@ -132,7 +134,12 @@
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <TextBlock Text="{Binding Email}" VerticalAlignment="Center" FontSize="12"/>
+                            <StackPanel VerticalAlignment="Center">
+                                <TextBlock Text="{Binding Email}" FontSize="12"/>
+                                <TextBlock Text="{Binding Note}" FontSize="10" Foreground="#FFB37C"
+                                           TextWrapping="Wrap"
+                                           Visibility="{Binding HasNote, Converter={StaticResource BooleanToVisibilityConverter}}"/>
+                            </StackPanel>
                             <Button Grid.Column="1" Content="Remove" Padding="8,2" FontSize="10"
                                     Click="RemoveGoogleAccount_Click" Tag="{Binding Email}"
                                     Background="#40FFFFFF" Foreground="White" BorderThickness="0" Cursor="Hand"/>

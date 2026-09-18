@@ -229,16 +229,40 @@ public sealed class DesktopPublishHost : IDisposable
                 publisher,
                 queue,
                 log,
-                // In memory, not on disk, for the reason InMemoryPublishPolicyStore
-                // gives: this host is restarted by a PERSON launching it, and one
-                // publish at launch is both cheap and what they would expect. The
-                // agent's file-backed store answers a different question — it is
-                // restarted by service managers and supervisors, which must not
-                // each buy a fresh baseline.
-                new PublishPolicy(new InMemoryPublishPolicyStore())),
+                CreatePolicyFor(queue)),
             log,
             publisher);
     }
+
+    /// <summary>
+    /// The publish policy this host runs under: a baseline that OUTLIVES the
+    /// host, plus one startup publish.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Why the state is on disk and not in memory.</b> This host does not
+    /// live as long as the application does. <c>App.RestartPublishing</c>
+    /// disposes and rebuilds it at startup and again every time the settings are
+    /// saved, so a policy holding its state in memory loses its baseline on each
+    /// rebuild, reads back "nothing published yet" and takes the FirstPublish
+    /// branch — publishing regardless of the minimum interval. Observed in
+    /// production as three rows inside two minutes against a 290-second floor.
+    /// The state therefore lives in the offline-queue directory this host
+    /// already owns (see <see cref="FilePublishPolicyStore"/> for why there and
+    /// nowhere else), where a rebuilt host reads back what the previous one
+    /// wrote and the floor means what it says.
+    /// </para>
+    /// <para>
+    /// <b>Why a restart still publishes.</b> Persisting the baseline would
+    /// otherwise make a relaunch silent for up to a heartbeat, which is exactly
+    /// how it would look to someone who had just switched publishing on. So the
+    /// policy is given one startup publish — spent once, and only once the
+    /// minimum interval has elapsed, so a run of restarts or saved settings
+    /// costs at most one row per interval rather than one row apiece.
+    /// </para>
+    /// </remarks>
+    internal static PublishPolicy CreatePolicyFor(OfflineQueue queue) =>
+        new(FilePublishPolicyStore.ForQueue(queue), options: null, publishOnStart: true);
 
     /// <summary>
     /// Hands one refresh's reports to the publish cycle and returns at once —

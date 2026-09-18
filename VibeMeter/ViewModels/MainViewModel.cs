@@ -64,7 +64,16 @@ public partial class MainViewModel : ObservableObject
 
     // --- Constructors ---
 
-    public MainViewModel() : this(new ProviderRegistry(), new SettingsService()) { }
+    public MainViewModel() : this(new SettingsService()) { }
+
+    /// <summary>
+    /// Builds the registry around the SAME settings service this view model
+    /// uses, so the convenience constructor cannot hand the Google provider a
+    /// registry that knows nothing about this host's accounts — which would
+    /// publish "not configured" for an account sitting in settings.json.
+    /// </summary>
+    private MainViewModel(SettingsService settingsService)
+        : this(new ProviderRegistry(new SettingsGoogleAccountSource(settingsService)), settingsService) { }
 
     public MainViewModel(ProviderRegistry registry, SettingsService settingsService)
     {
@@ -73,8 +82,11 @@ public partial class MainViewModel : ObservableObject
         _settings = _settingsService.Load();
         ApplySettings(_settings);
 
-        // Seed the Google provider with VibeMeter-owned accounts from settings.
-        SyncGoogleAccountsToProvider();
+        // The Google provider reads its configured accounts from the settings
+        // file itself, on every fetch (see SettingsGoogleAccountSource), so
+        // there is deliberately nothing to seed here: a provider populated once
+        // from this constructor is a provider that reports "not configured"
+        // whenever this constructor was not the thing that built it.
 
         // Re-fetch when the user cycles to the next Google account.
         GoogleProvider.ActiveAccountChanged += async () => await RefreshAsync();
@@ -193,9 +205,19 @@ public partial class MainViewModel : ObservableObject
             // De-dupe by email: if the account already exists, replace its token.
             _settings.GoogleAccounts.RemoveAll(a =>
                 string.Equals(a.Email, email, StringComparison.OrdinalIgnoreCase));
-            _settings.GoogleAccounts.Add(new GoogleAccount { Email = email, RefreshToken = refreshToken });
+
+            var account = new GoogleAccount { Email = email };
+            if (!GoogleAccountProtection.Seal(account, refreshToken, _settingsService.Protector))
+            {
+                // Storing it in the clear is not an option, so the account is
+                // not stored at all and the person is told why.
+                return ("", "Windows could not protect the Google refresh token for this profile, " +
+                            "so the account was not saved. This usually means a roaming or " +
+                            "temporary profile; try again on the machine's own account.");
+            }
+
+            _settings.GoogleAccounts.Add(account);
             _settingsService.Save(_settings);
-            SyncGoogleAccountsToProvider();
             return (email, null);
         }
         catch (Exception ex)
@@ -210,20 +232,10 @@ public partial class MainViewModel : ObservableObject
         _settings.GoogleAccounts.RemoveAll(a =>
             string.Equals(a.Email, email, StringComparison.OrdinalIgnoreCase));
         _settingsService.Save(_settings);
-        SyncGoogleAccountsToProvider();
     }
 
     /// <summary>The configured Google accounts (read-only view for the Settings UI).</summary>
     public IReadOnlyList<GoogleAccount> GetGoogleAccounts() => _settings.GoogleAccounts;
-
-    /// <summary>
-    /// Copies settings → the Google provider's configured-account list. The provider merges
-    /// these with the auto-detected Antigravity account to form the carousel roster.
-    /// </summary>
-    private void SyncGoogleAccountsToProvider()
-    {
-        GoogleProvider.ConfiguredAccounts = _settings.GoogleAccounts.ToList();
-    }
 
     public void SaveSettings()
     {

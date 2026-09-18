@@ -96,9 +96,27 @@ public partial class SettingsViewModel : ObservableObject
         UpdateLastUpdatedText();
     }
 
-    /// <summary>The configured Google accounts, for the Settings UI list.</summary>
-    public System.Collections.Generic.IReadOnlyList<VibeMeter.Providers.Google.GoogleAccount> GetGoogleAccounts()
-        => _mainViewModel.GetGoogleAccounts();
+    /// <summary>
+    /// The configured Google accounts, for the Settings UI list. Projected
+    /// rather than bound directly, so the window never holds a
+    /// <see cref="VibeMeter.Providers.Google.GoogleAccount"/> - whose in-memory
+    /// refresh token has no business being reachable from a data template - and
+    /// so an account whose stored credential could not be opened on this
+    /// machine says so instead of silently failing at the next refresh.
+    /// </summary>
+    public List<GoogleAccountRow> GetGoogleAccounts()
+    {
+        var rows = new List<GoogleAccountRow>();
+        foreach (var account in _mainViewModel.GetGoogleAccounts())
+        {
+            rows.Add(new GoogleAccountRow(
+                account.Email,
+                account.NeedsReauthentication
+                    ? "credential unavailable on this profile - remove and add again"
+                    : ""));
+        }
+        return rows;
+    }
 
     /// <summary>Runs the interactive Google OAuth flow; returns (email, error).</summary>
     public async Task<(string Email, string? Error)> AddGoogleAccountAsync()
@@ -237,6 +255,13 @@ public partial class ProviderToggle : ObservableObject
         Id = id;
         DisplayName = displayName;
     }
+}
+
+/// <summary>One row of the Settings window's Google account list.</summary>
+/// <param name="Note">Empty unless the account needs attention.</param>
+public record GoogleAccountRow(string Email, string Note)
+{
+    public bool HasNote => Note.Length > 0;
 }
 
 public record RefreshIntervalOption(int Seconds, string Label);
