@@ -1,0 +1,56 @@
+# VibeMeter.Agent as a USER service — the right shape for a personal
+# development machine, and the wrong one for a shared server.
+#
+# Why this exists alongside vibemeter-agent.service:
+#   The providers read credentials the AI tools wrote into the signed-in user's
+#   own home — ~/.claude, ~/.codex, ~/.zcode. A dedicated service account has
+#   none of them, so the system unit collects nothing on a box where the person
+#   using it is the person whose quota is being measured. It reports every
+#   provider as not-configured and looks healthy doing it.
+#
+#   Running as the user fixes that by construction: HOME is already correct, the
+#   MSAL cache written by `--login` is the one the service reads, and no
+#   credential has to be copied anywhere.
+#
+# Install (NO sudo):
+#   mkdir -p ~/.config/systemd/user ~/.config/vibemeter
+#   cp deploy/vibemeter-agent-user.service ~/.config/systemd/user/vibemeter-agent.service
+#   cp deploy/vibemeter-agent.env.example  ~/.config/vibemeter/agent.env
+#   chmod 600 ~/.config/vibemeter/agent.env     # it may hold a bearer token
+#   $EDITOR ~/.config/vibemeter/agent.env
+#   ~/vibemeter/VibeMeter.Agent --login          # as YOURSELF, before starting
+#   systemctl --user daemon-reload
+#   systemctl --user enable --now vibemeter-agent
+#
+# Survive logout and start at boot (otherwise the service stops when the last
+# session ends, which on a headless box means it stops the moment you disconnect):
+#   sudo loginctl enable-linger $USER
+#
+# Watch it:  journalctl --user -u vibemeter-agent -f
+
+[Unit]
+Description=VibeMeter AI-usage agent (user service)
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=%h/.config/vibemeter/agent.env
+WorkingDirectory=%h/vibemeter
+ExecStart=%h/vibemeter/VibeMeter.Agent
+
+# HOME is already the user's, so the provider credential paths, the offline
+# queue and the MSAL token cache all resolve to the same place `--login` used.
+
+Restart=always
+RestartSec=30
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=vibemeter-agent
+
+TimeoutStopSec=30
+NoNewPrivileges=true
+
+[Install]
+WantedBy=default.target
