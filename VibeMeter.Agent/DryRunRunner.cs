@@ -160,8 +160,14 @@ public sealed class DryRunRunner
 
             if (wouldPublish.TryGetValue(usage.ProviderId, out var snapshot))
             {
+                // Name the surface the figures came from, when the provider has more than
+                // one. Without it a dry-run cannot tell a live reading from a file that
+                // happened to be fresh: the CLI cache yields the same state, the same gauge
+                // count and the same plan label as the usage endpoint, and "the agent works"
+                // was once concluded from exactly that line while the live source was in
+                // fact failing on every attempt.
                 Output.WriteLine(
-                    $"  {usage.ProviderId,-16} state={snapshot.State,-16} gauges={snapshot.Gauges?.Count ?? 0}  would be published");
+                    $"  {usage.ProviderId,-16} state={snapshot.State,-16} gauges={snapshot.Gauges?.Count ?? 0}  would be published{DescribeSource(usage)}");
             }
             else
             {
@@ -182,6 +188,14 @@ public sealed class DryRunRunner
             : $"DRY-RUN FAILED - 0 of {collectedCount} provider report(s) would be published " +
               $"({omittedCount} omitted as stale, {droppedCount} dropped while mapping), so the agent would publish nothing at all.");
     }
+
+    /// <summary>
+    /// " (source: &lt;label&gt;)" for a provider that says which of its sources supplied the
+    /// figures; nothing for one with a single source. The label is the provider's own
+    /// <see cref="ProviderUsage.SourceLabel"/> — never a path, a header or a token.
+    /// </summary>
+    private static string DescribeSource(ProviderUsage usage) =>
+        string.IsNullOrWhiteSpace(usage.SourceLabel) ? "" : $" (source: {usage.SourceLabel})";
 
     /// <summary>The gate's omission lines all start "Provider '&lt;id&gt;' omitted: ";
     /// the summary shows the reason without the prefix.</summary>

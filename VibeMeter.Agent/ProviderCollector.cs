@@ -20,6 +20,11 @@ internal sealed class ProviderCollector
 
     private readonly IReadOnlyList<IUsageProvider> _providers;
 
+    // One line when a provider starts reading from a fallback source, one when the reason
+    // changes, one when it recovers — and silence on the cycles in between. See
+    // ProviderUsage.SourceDiagnostic for why a working fallback still needs saying.
+    private readonly VibeMeter.Publishing.SourceDiagnosticTracker _sourceDiagnostics = new();
+
     public ProviderCollector(IReadOnlyList<IUsageProvider> providers)
     {
         _providers = providers;
@@ -56,7 +61,14 @@ internal sealed class ProviderCollector
             {
                 // WaitAsync both bounds a hung provider and lets shutdown
                 // interrupt an in-flight fetch despite FetchAsync taking no token.
-                return await provider.FetchAsync().WaitAsync(FetchTimeout, cancellationToken);
+                var usage = await provider.FetchAsync().WaitAsync(FetchTimeout, cancellationToken);
+
+                if (_sourceDiagnostics.NoteChange(usage) is { } sourceNote)
+                {
+                    AgentLog.Warn(sourceNote);
+                }
+
+                return usage;
             }
             catch (TimeoutException)
             {

@@ -113,6 +113,31 @@ public sealed class ProviderUsage
     /// </remarks>
     public string? SourceLabel { get; init; }
 
+    /// <summary>
+    /// Why the provider's PREFERRED source did not supply the figures, when a lesser one did
+    /// — for Claude, why the live Anthropic usage API produced no reading this cycle and a
+    /// local file was used instead. <see langword="null"/> when the preferred source was the
+    /// one used, or when the provider has only one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Purely diagnostic and deliberately additive, like <see cref="SourceLabel"/>: the hosts
+    /// log it once each time it appears, changes or clears, the freshness gate quotes it
+    /// inside every staleness omission it leads to, and it is never shown on a card and never
+    /// published. It exists because a preferred source that fails on EVERY cycle is otherwise
+    /// invisible: the fallback keeps the card working, and the only symptom is the fallback's
+    /// age tripping the freshness gate — a log line that names the file that was too old and
+    /// says nothing about why the source that is never too old was not used. That is exactly
+    /// how the live Claude source was found to be failing silently for an hour on a machine
+    /// whose console agent appeared to work.
+    /// </para>
+    /// <para>
+    /// SECURITY: a fixed description or an HTTP status code. Never a token, a header or a
+    /// response body — the same rule as every other string that reaches a log.
+    /// </para>
+    /// </remarks>
+    public string? SourceDiagnostic { get; init; }
+
     /// <summary>Convenience factory for a "not yet implemented / coming soon" provider.</summary>
     public static ProviderUsage ComingSoon(string id, string displayName, string note) => new()
     {

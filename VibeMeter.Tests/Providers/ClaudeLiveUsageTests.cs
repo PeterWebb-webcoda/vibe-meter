@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using VibeMeter.Core;
 using VibeMeter.Providers.Claude;
 using Xunit;
 
@@ -241,7 +242,16 @@ public sealed class ClaudeLiveUsageTests : IDisposable
         Assert.Equal($"Bearer {SyntheticToken}", request.Authorization);
         Assert.Equal("oauth-2025-04-20", request.AnthropicBeta);
         Assert.Contains("application/json", request.Accept, StringComparison.Ordinal);
-        Assert.Contains("claude-cli", request.UserAgent, StringComparison.Ordinal);
+
+        // The product token is the verified call's — the one this machine's statusline
+        // script sends successfully with the same credential — and the comment says who we
+        // really are. It must not announce itself as an obsolete build of the CLI: not because
+        // that was ever shown to be refused (the 2026-09-18 failure was a per-address 429,
+        // whatever the user agent), but because it is a needless difference from the request
+        // proven to work, and an untrue one.
+        Assert.StartsWith("claude-code/2.0.32", request.UserAgent, StringComparison.Ordinal);
+        Assert.Contains("vibe-meter", request.UserAgent, StringComparison.Ordinal);
+        Assert.DoesNotContain("claude-cli/", request.UserAgent, StringComparison.Ordinal);
     }
 
     [Fact]
@@ -310,6 +320,142 @@ public sealed class ClaudeLiveUsageTests : IDisposable
 
         var chosen = await ClaudeUsageSources.ReadBestAsync(attempt.Snapshot, GladuxCliCache, null);
         Assert.Equal(ClaudeUsageSource.CliCache, chosen!.Source);
+    }
+
+    // ---------------------------------------------------- saying why, where it can be seen
+
+    [Theory]
+    [InlineData(HttpStatusCode.InternalServerError)]
+    [InlineData(HttpStatusCode.BadGateway)]
+    [InlineData(HttpStatusCode.TooManyRequests)]
+    [InlineData(HttpStatusCode.Unauthorized)]
+    [InlineData(HttpStatusCode.Forbidden)]
+    public async Task WhenTheCallFails_TheReasonIsCarriedForTheLog_NamingTheStatus(HttpStatusCode status)
+    {
+        // The bug this pins: a live source that fails on EVERY cycle used to be invisible.
+        // The card stays quiet — correctly, the files are there for this — but the only
+        // trace anywhere was the fallback file's age tripping the freshness gate, a line
+        // that named the file that was too old and said nothing about why the source that
+        // is never too old was passed over. So the reason now travels with the attempt.
+        var dir = WriteCredentials(CredentialsJson());
+        using var handler = StubHandler.Serving(status, "{}");
+
+        var attempt = await AttemptAsync(dir, handler);
+
+        Assert.Null(attempt.Snapshot);
+        Assert.NotNull(attempt.Diagnostic);
+        Assert.Contains(ClaudeUsageSources.LiveSourceLabel, attempt.Diagnostic!, StringComparison.Ordinal);
+        Assert.Contains(((int)status).ToString(), attempt.Diagnostic!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task WhenTheNetworkIsUnreachable_TheReasonIsCarriedForTheLog()
+    {
+        var dir = WriteCredentials(CredentialsJson());
+        using var handler = StubHandler.Throwing(new HttpRequestException("no such host"));
+
+        var attempt = await AttemptAsync(dir, handler);
+
+        Assert.NotNull(attempt.Diagnostic);
+        Assert.Contains("could not be reached", attempt.Diagnostic!, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    public async Task AnExpiredToken_IsCarriedForTheLogToo()
+    {
+        var expired = DateTimeOffset.UtcNow.AddDays(-2).ToUnixTimeMilliseconds();
+        var dir = WriteCredentials(CredentialsJson(expiresAt: expired));
+        using var handler = new FailIfCalledHandler();
+
+        var attempt = await AttemptAsync(dir, handler);
+
+        Assert.NotNull(attempt.Diagnostic);
+        Assert.Contains("expired", attempt.Diagnostic!, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public async Task ASuccessfulCall_AndAMachineWithNoSignIn_HaveNothingToExplain()
+    {
+        // No sign-in is an ordinary state, not a fault; and a live reading that won needs
+        // no explanation. Neither may produce a line in anyone's log.
+        var withCredential = WriteCredentials(CredentialsJson());
+        using var ok = StubHandler.Serving(HttpStatusCode.OK, UsageResponse());
+        Assert.Null((await AttemptAsync(withCredential, ok)).Diagnostic);
+
+        var noCredential = Path.Combine(_scratch, "no-sign-in");
+        Directory.CreateDirectory(noCredential);
+        using var never = new FailIfCalledHandler();
+        Assert.Null((await AttemptAsync(noCredential, never)).Diagnostic);
+    }
+
+    [Theory]
+    [InlineData(HttpStatusCode.ServiceUnavailable, false)]
+    [InlineData(HttpStatusCode.OK, true)]
+    public async Task TheReadingItselfSaysWhichSourceWon_AndWhyTheLiveOneDidNot(
+        HttpStatusCode status, bool liveWins)
+    {
+        // End to end through the provider: the reading the hosts log and publish carries
+        // both the winning source and, when the live source lost, the reason it lost.
+        var dir = WriteCredentials(CredentialsJson());
+        File.Copy(GladuxCliCache, Path.Combine(dir, "usage_cache.json"));
+        using var handler = StubHandler.Serving(status, UsageResponse());
+        var provider = new ClaudeProvider(
+            new ClaudeAuth(),
+            () => new ClaudeApiClient(new HttpClient(handler, disposeHandler: false)));
+
+        var usage = await WithConfigDirAsync(dir, () => provider.FetchAsync());
+
+        Assert.Equal(ProviderState.Ok, usage.State);
+        if (liveWins)
+        {
+            Assert.Equal(ClaudeUsageSources.LiveSourceLabel, usage.SourceLabel);
+            Assert.Null(usage.SourceDiagnostic);
+        }
+        else
+        {
+            Assert.Equal("Claude Code CLI cache", usage.SourceLabel);
+            Assert.NotNull(usage.SourceDiagnostic);
+            Assert.Contains("503", usage.SourceDiagnostic!, StringComparison.Ordinal);
+            Assert.DoesNotContain(SyntheticToken, usage.SourceDiagnostic!, StringComparison.Ordinal);
+        }
+    }
+
+    // ------------------------------------------- the WPF host's threading model, pinned
+
+    [Fact]
+    public async Task TheWholeFetchCompletesUnderASingleThreadedSynchronizationContext_LikeAWpfDispatcher()
+    {
+        // The tray app awaits FetchAsync from a DispatcherTimer tick with no
+        // ConfigureAwait(false) anywhere above the HTTP client, so every continuation in the
+        // provider is posted back to ONE thread — the same shape as a WPF dispatcher. Any
+        // blocking wait on that path would deadlock, and a deadlock would surface as the
+        // client's timeout: a silent Failed, a silent fallback, and a Claude card that quietly
+        // stops being live only in the WPF host. This runs the real path under exactly that
+        // constraint, against a transport that completes OFF that thread, and requires the
+        // live reading to come back — on the pump thread, as the dispatcher would deliver it.
+        var dir = WriteCredentials(CredentialsJson());
+        File.Copy(GladuxCliCache, Path.Combine(dir, "usage_cache.json"));
+        using var handler = new OffThreadHandler(HttpStatusCode.OK, UsageResponse());
+        var provider = new ClaudeProvider(
+            new ClaudeAuth(),
+            () => new ClaudeApiClient(new HttpClient(handler, disposeHandler: false)));
+
+        using var pump = new SingleThreadedSynchronizationContext();
+        var (usage, resumedOn) = await WithConfigDirAsync(dir, () => pump.RunAsync(async () =>
+        {
+            var result = await provider.FetchAsync();
+            return (result, Environment.CurrentManagedThreadId);
+        }, TimeSpan.FromSeconds(20)));
+
+        Assert.Equal(ProviderState.Ok, usage.State);
+        Assert.Equal(ClaudeUsageSources.LiveSourceLabel, usage.SourceLabel);
+        Assert.Null(usage.SourceDiagnostic);
+
+        // The premise of the test, asserted rather than assumed: the transport really did
+        // answer from another thread, and the continuations really did hop back.
+        Assert.NotEqual(pump.ThreadId, handler.AnsweredOnThreadId);
+        Assert.Equal(pump.ThreadId, resumedOn);
+        Assert.True(pump.PostCount > 0, "no continuation was posted to the context, so nothing was exercised");
     }
 
     [Fact]
@@ -390,6 +536,7 @@ public sealed class ClaudeLiveUsageTests : IDisposable
         // holds the token by design — it is what the request is built from — so it is the
         // reported strings that are checked here.
         Assert.DoesNotContain(SyntheticToken, attempt.Note ?? "", StringComparison.Ordinal);
+        Assert.DoesNotContain(SyntheticToken, attempt.Diagnostic ?? "", StringComparison.Ordinal);
         Assert.DoesNotContain(SyntheticToken, attempt.Snapshot?.SourcePath ?? "", StringComparison.Ordinal);
         Assert.DoesNotContain(SyntheticToken, attempt.Snapshot?.SourceLabel ?? "", StringComparison.Ordinal);
     }
@@ -579,6 +726,113 @@ public sealed class ClaudeLiveUsageTests : IDisposable
         {
             WasCalled = true;
             throw new InvalidOperationException("The usage endpoint must not be contacted in this case.");
+        }
+    }
+
+    /// <summary>
+    /// Answers from a thread-pool thread after a genuine asynchronous hop, the way a real
+    /// socket completion does — so the continuation above it has to be marshalled back.
+    /// </summary>
+    private sealed class OffThreadHandler(HttpStatusCode status, string body) : HttpMessageHandler
+    {
+        public int AnsweredOnThreadId { get; private set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(50), cancellationToken).ConfigureAwait(false);
+            AnsweredOnThreadId = Environment.CurrentManagedThreadId;
+            return new HttpResponseMessage(status)
+            {
+                Content = new StringContent(body, Encoding.UTF8, "application/json"),
+            };
+        }
+    }
+
+    /// <summary>
+    /// A <see cref="SynchronizationContext"/> with the one property of a WPF dispatcher that
+    /// matters to async code: every posted continuation runs on a single dedicated thread,
+    /// in order, and that thread does nothing else. Code that blocks that thread waiting on
+    /// a continuation that needs it deadlocks — here, into the caller's timeout rather than
+    /// a hung test run.
+    /// </summary>
+    private sealed class SingleThreadedSynchronizationContext : SynchronizationContext, IDisposable
+    {
+        private readonly System.Collections.Concurrent.BlockingCollection<(SendOrPostCallback Callback, object? State)> _queue = new();
+        private readonly Thread _thread;
+        private int _postCount;
+
+        public SingleThreadedSynchronizationContext()
+        {
+            _thread = new Thread(Pump) { IsBackground = true, Name = "test-dispatcher" };
+            _thread.Start();
+        }
+
+        public int ThreadId => _thread.ManagedThreadId;
+
+        public int PostCount => Volatile.Read(ref _postCount);
+
+        public override void Post(SendOrPostCallback d, object? state)
+        {
+            Interlocked.Increment(ref _postCount);
+            _queue.Add((d, state));
+        }
+
+        public override void Send(SendOrPostCallback d, object? state)
+        {
+            // Dispatcher.Invoke semantics: inline on the dispatcher thread, blocking otherwise.
+            if (Environment.CurrentManagedThreadId == ThreadId)
+            {
+                d(state);
+                return;
+            }
+
+            using var done = new ManualResetEventSlim();
+            _queue.Add(((SendOrPostCallback)(s => { d(s); done.Set(); }), state));
+            done.Wait();
+        }
+
+        public override SynchronizationContext CreateCopy() => this;
+
+        /// <summary>
+        /// Starts <paramref name="body"/> ON the pump thread, with this context current, and
+        /// waits for it from the calling thread — bounded, so a deadlock fails instead of hangs.
+        /// </summary>
+        public async Task<T> RunAsync<T>(Func<Task<T>> body, TimeSpan timeout)
+        {
+            var completion = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+            Post(async _ =>
+            {
+                try
+                {
+                    completion.TrySetResult(await body());
+                }
+                catch (Exception ex)
+                {
+                    completion.TrySetException(ex);
+                }
+            }, null);
+
+            return await completion.Task.WaitAsync(timeout);
+        }
+
+        private void Pump()
+        {
+            SetSynchronizationContext(this);
+            foreach (var (callback, state) in _queue.GetConsumingEnumerable())
+            {
+                callback(state);
+            }
+        }
+
+        public void Dispose()
+        {
+            _queue.CompleteAdding();
+            if (!_thread.Join(TimeSpan.FromSeconds(5)))
+            {
+                // A pump still busy at teardown is a test failure elsewhere; do not hang here.
+            }
+            _queue.Dispose();
         }
     }
 }

@@ -57,6 +57,27 @@ public sealed class DryRunTests
     }
 
     [Fact]
+    public async Task DryRun_NamesTheWinningSource_ForAProviderThatHasMoreThanOne()
+    {
+        // A live reading and a fresh CLI cache produce the same state, gauge count and
+        // plan label, so without the source on the line a dry-run cannot tell whether the
+        // preferred source actually worked. That is exactly how "the agent works" was once
+        // concluded while the live source was failing on every attempt.
+        var output = await RunToString(
+            FromSource("claude", "Anthropic usage API", observedAt: DateTimeOffset.UtcNow),
+            Live("codex"));
+
+        Assert.Contains("would be published (source: Anthropic usage API)", output);
+
+        // A single-source provider says nothing about a source it does not choose between.
+        var codexLine = output
+            .Split(Environment.NewLine, StringSplitOptions.RemoveEmptyEntries)
+            .Single(line => line.TrimStart().StartsWith("codex", StringComparison.Ordinal)
+                            && line.Contains("would be published", StringComparison.Ordinal));
+        Assert.DoesNotContain("(source:", codexLine);
+    }
+
+    [Fact]
     public async Task DryRun_WhenNothingIsPublishable_ExitsNonZero()
     {
         var publisher = new RecordingPublisher();
@@ -217,6 +238,16 @@ public sealed class DryRunTests
         DisplayName = id,
         State = ProviderState.Ok,
         SourceObservedAt = observedAt,
+        Gauges = [new UsageGauge("g", "Gauge", null, 50, null)],
+    };
+
+    private static ProviderUsage FromSource(string id, string sourceLabel, DateTimeOffset observedAt) => new()
+    {
+        ProviderId = id,
+        DisplayName = id,
+        State = ProviderState.Ok,
+        SourceObservedAt = observedAt,
+        SourceLabel = sourceLabel,
         Gauges = [new UsageGauge("g", "Gauge", null, 50, null)],
     };
 

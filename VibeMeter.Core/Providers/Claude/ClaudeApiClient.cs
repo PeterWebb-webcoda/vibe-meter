@@ -8,7 +8,7 @@ using System.Threading.Tasks;
 
 namespace VibeMeter.Providers.Claude;
 
-/// <summary>How a usage fetch ended. The three cases call for three different responses.</summary>
+/// <summary>How a usage fetch ended. The four cases call for four different responses.</summary>
 internal enum ClaudeApiOutcome
 {
     /// <summary>The endpoint answered with a usage payload.</summary>
@@ -21,8 +21,15 @@ internal enum ClaudeApiOutcome
     CredentialRejected,
 
     /// <summary>
+    /// The endpoint answered HTTP 429. Distinct from <see cref="Failed"/> because the server
+    /// has said, in <c>Retry-After</c>, exactly how long to stay away — and because coming
+    /// back sooner is what keeps the limit tripped. See <see cref="ClaudeLiveSourceBackoff"/>.
+    /// </summary>
+    RateLimited,
+
+    /// <summary>
     /// Anything else — no network, a timeout, a 5xx, an unreadable body. Nothing is wrong
-    /// with the sign-in, so the caller simply falls back to the local files and says nothing.
+    /// with the sign-in, so the caller falls back to the local files.
     /// </summary>
     Failed,
 }
@@ -34,11 +41,22 @@ internal enum ClaudeApiOutcome
 /// A short description of a failure, safe to show or log. It never contains the token, a
 /// request header, or the response body.
 /// </param>
-internal sealed record ClaudeApiResult(ClaudeApiOutcome Outcome, ClaudeUsageData? Data, string? Detail)
+/// <param name="RetryAfter">
+/// For <see cref="ClaudeApiOutcome.RateLimited"/>, how long the server asked us to wait,
+/// when it said. Null when the header was absent, unreadable or already in the past.
+/// </param>
+internal sealed record ClaudeApiResult(
+    ClaudeApiOutcome Outcome,
+    ClaudeUsageData? Data,
+    string? Detail,
+    TimeSpan? RetryAfter = null)
 {
     public static ClaudeApiResult Succeeded(ClaudeUsageData data) => new(ClaudeApiOutcome.Success, data, null);
     public static ClaudeApiResult Rejected(string detail) => new(ClaudeApiOutcome.CredentialRejected, null, detail);
     public static ClaudeApiResult Failed(string detail) => new(ClaudeApiOutcome.Failed, null, detail);
+
+    public static ClaudeApiResult RateLimited(string detail, TimeSpan? retryAfter) =>
+        new(ClaudeApiOutcome.RateLimited, null, detail, retryAfter);
 }
 
 /// <summary>
@@ -51,15 +69,32 @@ internal sealed record ClaudeApiResult(ClaudeApiOutcome Outcome, ClaudeUsageData
 /// Mirrors <c>CodexApiClient</c>, with two deliberate differences.
 /// </para>
 /// <para>
-/// <b>No retry.</b> The Codex client retries transient failures because the API is that
-/// provider's only source. Here it is one of three: a failed fetch falls back to the CLI
-/// cache and then the desktop history, which is cheaper and quieter than making the user
-/// wait through a backoff on every poll.
+/// <b>No in-call retry.</b> The Codex client retries transient failures because the API is
+/// that provider's only source. Here it is one of three: a failed fetch falls back to the
+/// CLI cache and then the desktop history, which is cheaper and quieter than making the
+/// user wait through a backoff on every poll. What this client does instead is
+/// <i>classify</i> the failure precisely — a 429 with its <c>Retry-After</c> is not the
+/// same thing as a 502 — so the provider can decide how long to stay away
+/// (<see cref="ClaudeLiveSourceBackoff"/>).
 /// </para>
 /// <para>
 /// <b>A transport seam.</b> The Codex client news up its own <see cref="HttpClient"/>, so
 /// its tests cannot reach it. This one accepts a client, so the tests below it stub
 /// <see cref="HttpMessageHandler"/> and never touch the network.
+/// </para>
+/// <para>
+/// <b>The endpoint is rate limited per address, at the edge.</b> Observed 2026-09-18 on the
+/// Windows machine this was written on: the endpoint answered <c>429 Too Many Requests</c>
+/// from Cloudflare (<c>Server: cloudflare</c>, a <c>CF-RAY</c>, and
+/// <c>Retry-After: 3505</c>) to every request from this address, with or without a
+/// credential and whatever the User-Agent, while <c>/v1/models</c> from the same address
+/// answered an ordinary 401. A poll every minute, plus a statusline script that retries on
+/// every render once its own cache goes stale, is enough to trip that rule and then keep it
+/// tripped; the block lasts about an hour, and whichever caller lands first after it lifts
+/// re-trips it. Treating the 429 as an anonymous "Failed" and coming straight back next
+/// cycle — which is what this client's first version did, without a word in any log — is
+/// precisely the behaviour that sustains the block. Hence the separate outcome, the parsed
+/// <c>Retry-After</c>, and a provider that honours it.
 /// </para>
 /// </remarks>
 internal sealed class ClaudeApiClient : IDisposable
@@ -70,10 +105,27 @@ internal sealed class ClaudeApiClient : IDisposable
     private const string OauthBetaValue = "oauth-2025-04-20";
 
     /// <summary>
-    /// Identifies us as a Claude Code style client, while naming what we actually are.
-    /// Impersonating the CLI outright would be dishonest to the service we are calling.
+    /// The product token is the one the verified call sends — the statusline script that
+    /// writes this machine's <c>usage_cache.json</c> with the same token, every few minutes,
+    /// successfully — and the comment names what we actually are.
     /// </summary>
-    private const string UserAgentValue = "claude-cli/1.0.0 (external, vibe-meter)";
+    /// <remarks>
+    /// <para>
+    /// The previous value, <c>claude-cli/1.0.0 (external, vibe-meter)</c>, claimed to BE the
+    /// CLI, at a version long out of support. It was NOT the cause of the 2026-09-18 failure —
+    /// the 429 described in the class remarks was returned whatever the user agent — and it
+    /// is changed anyway, for two smaller reasons: it was the one needless difference between
+    /// this request and the one proven to work from this machine, and a client should not
+    /// announce itself as an obsolete build of a program it is not. The request now differs
+    /// from the known-working one in nothing but this comment and the <c>Content-Length: 0</c>
+    /// the framework adds for the empty body (see <see cref="BuildRequest"/>).
+    /// </para>
+    /// <para>
+    /// If the endpoint ever does object to a header, <see cref="ClaudeApiResult.Detail"/>
+    /// now carries the status code upstream, so the failure names itself instead of vanishing.
+    /// </para>
+    /// </remarks>
+    private const string UserAgentValue = "claude-code/2.0.32 (external, vibe-meter)";
 
     /// <summary>
     /// Deliberately short. This runs on a UI refresh, and a live source whose whole purpose
@@ -118,6 +170,17 @@ internal sealed class ClaudeApiClient : IDisposable
                 return ClaudeApiResult.Rejected($"the usage endpoint returned HTTP {(int)response.StatusCode}");
             }
 
+            if (response.StatusCode == HttpStatusCode.TooManyRequests)
+            {
+                // The one failure where the server says what to do next. Read the header;
+                // report only the status and the wait, never the body.
+                var retryAfter = ReadRetryAfter(response);
+                var detail = retryAfter is { } wait
+                    ? $"the usage endpoint returned HTTP 429 (Retry-After {wait.TotalSeconds:0} s)"
+                    : "the usage endpoint returned HTTP 429";
+                return ClaudeApiResult.RateLimited(detail, retryAfter);
+            }
+
             if (!response.IsSuccessStatusCode)
             {
                 return ClaudeApiResult.Failed($"the usage endpoint returned HTTP {(int)response.StatusCode}");
@@ -143,6 +206,28 @@ internal sealed class ClaudeApiClient : IDisposable
             // JsonException can quote the body. A fixed description says enough.
             return ClaudeApiResult.Failed(Describe(ex));
         }
+    }
+
+    /// <summary>
+    /// Reads <c>Retry-After</c> as a wait, whether the server sent seconds or an HTTP-date.
+    /// Null when absent, unreadable or already in the past.
+    /// </summary>
+    internal static TimeSpan? ReadRetryAfter(HttpResponseMessage response)
+    {
+        if (response.Headers.RetryAfter is not { } retryAfter) return null;
+
+        if (retryAfter.Delta is { } delta)
+        {
+            return delta > TimeSpan.Zero ? delta : null;
+        }
+
+        if (retryAfter.Date is { } date)
+        {
+            var wait = date - DateTimeOffset.UtcNow;
+            return wait > TimeSpan.Zero ? wait : null;
+        }
+
+        return null;
     }
 
     private static HttpRequestMessage BuildRequest(string token)

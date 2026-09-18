@@ -138,11 +138,25 @@ public sealed class FreshnessGate
     }
 
     /// <summary>
-    /// Names the surface the reading came from, when the provider reads from more than one.
-    /// An omission is much easier to act on when the line says WHICH file was too old.
+    /// Names the surface the reading came from, when the provider reads from more than one —
+    /// and, when the provider knows, why its preferred surface was not the one used. An
+    /// omission is much easier to act on when the line says WHICH file was too old, and it is
+    /// only actionable at all when it also says why the source that is never too old was
+    /// passed over: "the CLI cache was 28 minutes old" is a symptom, "the usage endpoint
+    /// returned HTTP 403" is the fault.
     /// </summary>
-    private static string DescribeSource(ProviderUsage usage) =>
-        string.IsNullOrWhiteSpace(usage.SourceLabel) ? "" : $" from {usage.SourceLabel}";
+    private static string DescribeSource(ProviderUsage usage)
+    {
+        if (string.IsNullOrWhiteSpace(usage.SourceLabel))
+        {
+            return "";
+        }
+
+        var source = $" from {usage.SourceLabel}";
+        return string.IsNullOrWhiteSpace(usage.SourceDiagnostic)
+            ? source
+            : $"{source} ({usage.SourceDiagnostic})";
+    }
 
     private static string DescribeAge(TimeSpan age) =>
         age.TotalHours >= 1 ? $"{age.TotalHours:0.#}h"

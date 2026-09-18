@@ -40,6 +40,14 @@ public sealed class ClaudeProvider : IUsageProvider
 
     private readonly ClaudeAuth _auth;
     private readonly Func<ClaudeApiClient> _clientFactory;
+
+    /// <summary>
+    /// How long to leave the live source alone after it fails — per provider instance, which
+    /// in both hosts lives for the whole process — so a 429's <c>Retry-After</c> is honoured
+    /// across polls rather than forgotten with the result that carried it.
+    /// </summary>
+    private readonly ClaudeLiveSourceBackoff _liveBackoff = new();
+
     private static Task<ClaudeCostDetailsData?>? _costTask;
     private static ClaudeCostDetailsData? _lastCostData;
 
@@ -88,8 +96,9 @@ public sealed class ClaudeProvider : IUsageProvider
         }
 
         // 3. Ask Anthropic directly. This is the only source whose freshness does not depend
-        //    on another program having run recently, so it outranks both files.
-        var live = await TryFetchLiveAsync(_auth, _clientFactory);
+        //    on another program having run recently, so it outranks both files — unless a
+        //    recent failure says to leave it alone for now (see ClaudeLiveSourceBackoff).
+        var live = await TryFetchLiveAsync(_auth, _clientFactory, _liveBackoff, DateTimeOffset.Now);
 
         // 4. Merge with the local surfaces. The live reading wins when there is one;
         //    otherwise the selection is exactly what it was before this source existed —
@@ -181,6 +190,11 @@ public sealed class ClaudeProvider : IUsageProvider
             // Two very different surfaces can land here. Say which one won, so a log line
             // about a stale or omitted Claude reading names the file it is talking about.
             SourceLabel = snapshot.SourceLabel,
+
+            // And when the live source did NOT win, say why — otherwise a live source that
+            // fails on every cycle is indistinguishable from one that was never tried, and the
+            // only visible symptom is a file's age in someone else's log line.
+            SourceDiagnostic = live.Diagnostic,
         };
     }
 
@@ -197,21 +211,56 @@ public sealed class ClaudeProvider : IUsageProvider
     /// Deliberately null for a transient failure and for a machine that simply has no
     /// Claude Code sign-in: neither is the user's to act on, and neither is a fault.
     /// </param>
+    /// <param name="Diagnostic">
+    /// A sentence for the LOG saying why the live source produced no reading, or null when it
+    /// did — or when there is simply no sign-in here, which is not a fault. Unlike
+    /// <paramref name="Note"/> it is present for transient failures too, and it carries the
+    /// client's fixed failure description (an HTTP status code, a timeout): a failure that
+    /// repeats on every cycle is a fault worth finding even when nothing is asked of the user.
+    /// It never contains the token, a header or a response body.
+    /// </param>
     internal readonly record struct LiveUsageAttempt(
         ClaudeUsageSnapshot? Snapshot,
         ClaudeCredential? Credential,
-        string? Note);
+        string? Note,
+        string? Diagnostic = null);
+
+    /// <summary>The log-facing explanation of a live attempt that produced no reading.</summary>
+    private static string LiveNotUsed(string? reason) =>
+        $"{ClaudeUsageSources.LiveSourceLabel} not used: {reason ?? "the usage endpoint could not be read"}";
 
     /// <summary>
-    /// Reads the stored credential and, if it is usable, fetches usage live.
+    /// Reads the stored credential and, if it is usable, fetches usage live — one attempt,
+    /// with no memory of earlier ones.
     /// </summary>
     /// <remarks>
     /// Internal and static so the tests can drive it with a stubbed transport, without
-    /// depending on which Claude files the build agent happens to have.
+    /// depending on which Claude files the build agent happens to have. Production goes
+    /// through the overload below, which remembers how the last attempt went.
+    /// </remarks>
+    internal static Task<LiveUsageAttempt> TryFetchLiveAsync(
+        ClaudeAuth auth,
+        Func<ClaudeApiClient> clientFactory) =>
+        TryFetchLiveAsync(auth, clientFactory, new ClaudeLiveSourceBackoff(), DateTimeOffset.Now);
+
+    /// <summary>
+    /// Reads the stored credential and, if it is usable and no recent failure says otherwise,
+    /// fetches usage live. Records how it went in <paramref name="backoff"/> so the next poll
+    /// knows whether to try.
+    /// </summary>
+    /// <param name="backoff">The schedule of pauses earned by earlier attempts; updated here.</param>
+    /// <param name="now">The clock, passed in so the schedule can be asserted in tests.</param>
+    /// <remarks>
+    /// While a pause is in force nothing is sent, and the attempt reports the SAME note and
+    /// the SAME diagnostic as the failure that started the pause — the same string, not a
+    /// fresh one — so a host that logs a diagnostic once per change stays silent through
+    /// the pause and speaks again only when something is actually different.
     /// </remarks>
     internal static async Task<LiveUsageAttempt> TryFetchLiveAsync(
         ClaudeAuth auth,
-        Func<ClaudeApiClient> clientFactory)
+        Func<ClaudeApiClient> clientFactory,
+        ClaudeLiveSourceBackoff backoff,
+        DateTimeOffset now)
     {
         var credential = await auth.GetCredentialAsync();
 
@@ -224,29 +273,56 @@ public sealed class ClaudeProvider : IUsageProvider
 
         // A lapsed token earns an opaque 401, which reads as "Claude is broken" rather than
         // "your sign-in lapsed". Do not spend a request finding that out.
-        if (credential.IsExpiredAt(DateTimeOffset.UtcNow))
+        if (credential.IsExpiredAt(now))
         {
             var expiry = credential.ExpiresAt!.Value.ToLocalTime();
             return new LiveUsageAttempt(null, credential,
-                $"Claude sign-in expired {expiry:yyyy-MM-dd} — {SignInCommand} on this PC to renew it.");
+                $"Claude sign-in expired {expiry:yyyy-MM-dd} — {SignInCommand} on this PC to renew it.",
+                LiveNotUsed($"the stored Claude sign-in expired {expiry:yyyy-MM-dd}"));
+        }
+
+        // A recent failure said to stay away — most importantly a 429, where the server named
+        // the wait itself. Coming back sooner cannot produce a reading and is exactly what
+        // keeps a per-address rate rule tripped for every other caller on this machine too.
+        if (backoff.IsPaused(now))
+        {
+            return new LiveUsageAttempt(null, credential, backoff.PausedNote, LiveNotUsed(backoff.PausedReason));
         }
 
         using var client = clientFactory();
         var result = await client.GetUsageAsync(credential.AccessToken!);
 
-        return result.Outcome switch
+        switch (result.Outcome)
         {
-            ClaudeApiOutcome.Success => new LiveUsageAttempt(
-                // Observed now, because we asked now. That is the whole point of this source.
-                ClaudeUsageSources.FromLiveApi(result.Data, DateTime.Now), credential, null),
+            case ClaudeApiOutcome.Success:
+                backoff.RecordSuccess();
+                return new LiveUsageAttempt(
+                    // Observed now, because we asked now. That is the whole point of this source.
+                    ClaudeUsageSources.FromLiveApi(result.Data, DateTime.Now), credential, null);
 
-            ClaudeApiOutcome.CredentialRejected => new LiveUsageAttempt(null, credential,
-                $"Claude sign-in was rejected — {SignInCommand} on this PC to renew it."),
+            case ClaudeApiOutcome.RateLimited:
+                // Transient as far as the user is concerned — nothing to do, the files are
+                // there for this — so the card stays quiet. The log is told, once, with the
+                // wait; and the endpoint is left alone for exactly that long.
+                backoff.RecordRateLimited(now, result.RetryAfter, result.Detail ?? "the usage endpoint returned HTTP 429");
+                return new LiveUsageAttempt(null, credential, null, LiveNotUsed(backoff.PausedReason));
 
-            // Transient: no network, a timeout, a 5xx. Nothing for the user to do, and the
-            // local files are there precisely for this. Stay quiet.
-            _ => new LiveUsageAttempt(null, credential, null),
-        };
+            case ClaudeApiOutcome.CredentialRejected:
+            {
+                var note = $"Claude sign-in was rejected — {SignInCommand} on this PC to renew it.";
+                backoff.RecordFailure(now, result.Detail ?? "the usage endpoint refused the credential", note);
+                return new LiveUsageAttempt(null, credential, note, LiveNotUsed(backoff.PausedReason));
+            }
+
+            default:
+                // Transient: no network, a timeout, a 5xx. Nothing for the user to do, and the
+                // local files are there precisely for this — so the CARD stays quiet. The LOG
+                // does not: the client's fixed description (a status code, a timeout) travels
+                // as the diagnostic, because a "transient" failure that recurs every cycle is
+                // the one kind of fault this design would otherwise never let anyone see.
+                backoff.RecordFailure(now, result.Detail ?? "the usage endpoint could not be read");
+                return new LiveUsageAttempt(null, credential, null, LiveNotUsed(backoff.PausedReason));
+        }
     }
 
     private ProviderUsage NotConfigured(string message) => new()

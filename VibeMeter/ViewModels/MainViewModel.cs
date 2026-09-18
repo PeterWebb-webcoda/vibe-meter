@@ -26,6 +26,13 @@ public partial class MainViewModel : ObservableObject
     /// </summary>
     private VibeMeter.Publishing.DesktopPublishHost? _publishHost;
 
+    /// <summary>
+    /// Notices when a provider starts, stops or changes reading from a fallback source, so
+    /// the error log gets one line per change rather than one per minute. See
+    /// <see cref="ProviderUsage.SourceDiagnostic"/> for why that line has to exist at all.
+    /// </summary>
+    private readonly VibeMeter.Publishing.SourceDiagnosticTracker _sourceDiagnostics = new();
+
     public ObservableCollection<ProviderViewModel> Providers { get; } = new();
 
     // --- Observable properties ---
@@ -140,6 +147,14 @@ public partial class MainViewModel : ObservableObject
             if (usage.State == ProviderState.Error)
             {
                 ErrorLog.Write(provider.Id, provider.DisplayName, usage.ErrorMessage);
+            }
+
+            // A successful reading that came from a FALLBACK source is not an error — the
+            // card is right — but a preferred source failing on every cycle is a fault, and
+            // this is the only place the tray can say so. Once per change, never per cycle.
+            if (_sourceDiagnostics.NoteChange(usage) is { } sourceNote)
+            {
+                ErrorLog.Write(provider.Id, provider.DisplayName, sourceNote);
             }
 
             System.Windows.Application.Current?.Dispatcher.Invoke(() => card.Apply(usage));

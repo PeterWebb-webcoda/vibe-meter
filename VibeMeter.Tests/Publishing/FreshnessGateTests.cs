@@ -151,6 +151,33 @@ public sealed class FreshnessGateTests
         Assert.Contains("), older than", Assert.Single(live.Omissions));
     }
 
+    [Fact]
+    public void AnOmissionSaysWhyThePreferredSourceWasNotUsed_WhenTheProviderKnows()
+    {
+        // The line this exists for. For an hour, a tray app logged "claude omitted: its
+        // data was observed 28.7 min ago from Claude Code CLI cache" every cycle — a true
+        // statement about the wrong thing. The CLI cache only ever supplies the figures when
+        // the live API has not, and nothing anywhere said why the live API had not. With the
+        // reason in the line, the symptom and the fault sit side by side.
+        var mapped = _gate.Apply(
+        [
+            FromSource("claude", observedAt: Now.AddMinutes(-28.7), source: "Claude Code CLI cache",
+                diagnostic: "Anthropic usage API not used: the usage endpoint returned HTTP 403"),
+        ], Now);
+
+        var omission = Assert.Single(mapped.Omissions);
+        Assert.Contains(
+            ") from Claude Code CLI cache (Anthropic usage API not used: the usage endpoint returned HTTP 403), older than",
+            omission);
+
+        // A blank diagnostic adds nothing — not even empty parentheses.
+        var quiet = _gate.Apply(
+        [
+            FromSource("claude", observedAt: Now.AddHours(-3), source: "Claude Code CLI cache", diagnostic: "  "),
+        ], Now);
+        Assert.Contains(") from Claude Code CLI cache, older than", Assert.Single(quiet.Omissions));
+    }
+
     // --------------------------------------------- configuration surface
 
     [Fact]
@@ -186,14 +213,17 @@ public sealed class FreshnessGateTests
         Gauges = [new UsageGauge("g", "Gauge", null, 50, null)],
     };
 
-    /// <summary>A file-derived fetch that also names which of several local surfaces won.</summary>
-    private static ProviderUsage FromSource(string id, DateTimeOffset observedAt, string source) => new()
+    /// <summary>A file-derived fetch that also names which of several local surfaces won —
+    /// and, optionally, why the provider's preferred source did not.</summary>
+    private static ProviderUsage FromSource(
+        string id, DateTimeOffset observedAt, string source, string? diagnostic = null) => new()
     {
         ProviderId = id,
         DisplayName = id,
         State = ProviderState.Ok,
         SourceObservedAt = observedAt,
         SourceLabel = source,
+        SourceDiagnostic = diagnostic,
         Gauges = [new UsageGauge("g", "Gauge", null, 50, null)],
     };
 
