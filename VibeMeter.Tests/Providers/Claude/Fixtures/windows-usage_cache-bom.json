@@ -1,0 +1,47 @@
+﻿{
+  "timestamp": "2026-09-18T08:30:00.000Z",
+  "data": {
+    "five_hour": {
+      "utilization": 41,
+      "resets_at": "2026-09-18T10:00:00.000000+00:00",
+      "limit_dollars": null,
+      "used_dollars": null,
+      "remaining_dollars": null,
+      "locked_reason": null
+    },
+    "seven_day": {
+      "utilization": 63,
+      "resets_at": "2026-09-22T04:00:00.000000+00:00",
+      "limit_dollars": null,
+      "used_dollars": null,
+      "remaining_dollars": null,
+      "locked_reason": null
+    },
+    "limits": [
+      {
+        "kind": "session",
+        "group": "default",
+        "percent": 41,
+        "severity": "normal",
+        "resets_at": "2026-09-18T10:00:00.000000+00:00",
+        "scope": null,
+        "is_active": true
+      },
+      {
+        "kind": "weekly_scoped",
+        "group": "opus",
+        "percent": 18,
+        "severity": "normal",
+        "resets_at": "2026-09-22T04:00:00.000000+00:00",
+        "scope": {
+          "model": {
+            "id": "claude-opus-5",
+            "display_name": "Opus"
+          },
+          "surface": null
+        },
+        "is_active": true
+      }
+    ]
+  }
+}

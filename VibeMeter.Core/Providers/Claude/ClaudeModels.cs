@@ -107,9 +107,11 @@ public class ClaudeLimitScopeModel
 // --- Raw DTOs for the Claude desktop app's sampled usage history ---
 //
 // plan-usage-history.json is written by the Claude desktop app (which on Windows also
-// hosts Claude Code). It appends a compact sample every ~5 minutes while the app runs.
-// Unlike the CLI cache it carries no reset timestamps and no scoped limits — only the
-// two headline percentages — so resets are inferred from where the series drops.
+// hosts Claude Code). It appends a compact sample on a coarse cadence while the app runs:
+// measured over 106 consecutive real samples the gap has a median of 30 minutes, not the
+// ~5 minutes this comment used to claim. Unlike the CLI cache it carries no reset
+// timestamps and no scoped limits — only the two headline percentages — so resets are
+// inferred from where the series drops.
 
 public class ClaudePlanUsageHistoryFile
 {

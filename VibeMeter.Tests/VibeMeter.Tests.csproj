@@ -14,6 +14,13 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Real files captured from the machines this provider actually runs on, so the
+         source-selection tests exercise the production readers rather than hand-built
+         objects. Copied verbatim; windows-usage_cache-bom.json keeps its UTF-8 BOM. -->
+    <Content Include="Providers\Claude\Fixtures\*.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\VibeMeter.Agent\VibeMeter.Agent.csproj" />
     <ProjectReference Include="..\VibeMeter.Core\VibeMeter.Core.csproj" />
     <ProjectReference Include="..\VibeMeter.Publishing\VibeMeter.Publishing.csproj" />

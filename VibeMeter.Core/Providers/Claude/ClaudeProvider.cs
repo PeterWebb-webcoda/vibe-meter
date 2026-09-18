@@ -63,7 +63,9 @@ public sealed class ClaudeProvider : IUsageProvider
             return Error(ex.Message);
         }
 
-        // 3. Read usage from whichever local surface has the freshest figures.
+        // 3. Read usage from the richest local surface that has any (NOT simply the most
+        //    recently written one - see ClaudeUsageSources.Merge for why that distinction
+        //    is the whole bug this selection was rewritten to fix).
         var snapshot = await ClaudeUsageSources.ReadBestAsync();
         if (snapshot is null)
         {
@@ -100,10 +102,15 @@ public sealed class ClaudeProvider : IUsageProvider
             resetNote = $"Weekly reset: {qualifier}{weeklyReset:MMM d, h:mm tt}";
         }
 
-        // 5. Staleness heads-up — the figures are only as fresh as the last Claude refresh.
+        // 5. Staleness heads-up — the figures are only as fresh as the last Claude refresh,
+        //    judged against the cadence of whichever surface supplied them. A sampled source
+        //    is not at fault for being between samples, so the desktop history is allowed to
+        //    miss several of its own 30-minute samples before we say anything; the CLI cache,
+        //    which is rewritten on use and so has no cadence, keeps the flat six-hour rule.
+        var now = DateTime.Now;
         string? errorMessage = null;
-        var age = DateTime.Now - snapshot.ObservedAt;
-        if (age.TotalHours > 6)
+        var age = now - snapshot.ObservedAt;
+        if (!snapshot.IsCurrentAt(now))
         {
             errorMessage = $"Figures are {Math.Floor(age.TotalHours)}h old — open Claude to refresh.";
         }
@@ -123,6 +130,10 @@ public sealed class ClaudeProvider : IUsageProvider
             // surface runs on THIS machine, so the snapshot's own observation time —
             // not this poll — is the honest age for the agent's freshness gate.
             SourceObservedAt = new DateTimeOffset(snapshot.ObservedAt),
+
+            // Two very different surfaces can land here. Say which one won, so a log line
+            // about a stale or omitted Claude reading names the file it is talking about.
+            SourceLabel = snapshot.SourceLabel,
         };
     }
 

@@ -131,6 +131,26 @@ public sealed class FreshnessGateTests
         Assert.Empty(mapped.Notes);
     }
 
+    [Fact]
+    public void AnOmissionNamesTheSourceThatSuppliedTheReading_WhenTheProviderHasMoreThanOne()
+    {
+        // Claude reads from either the CLI cache or the desktop app's sampled history,
+        // and "claude was omitted as stale" is a different problem in each case. The
+        // provenance the provider now records has to reach the log, or the next person
+        // to read a journal is back to guessing which file was too old.
+        var mapped = _gate.Apply(
+        [
+            FromSource("claude", observedAt: Now.AddHours(-3), source: "Claude desktop app history"),
+        ], Now);
+
+        var omission = Assert.Single(mapped.Omissions);
+        Assert.Contains(") from Claude desktop app history, older than", omission);
+
+        // A provider with a single source says nothing extra — no empty "from ".
+        var live = _gate.Apply([FileDerived("codex-cache", Now.AddHours(-3))], Now);
+        Assert.Contains("), older than", Assert.Single(live.Omissions));
+    }
+
     // --------------------------------------------- configuration surface
 
     [Fact]
@@ -163,6 +183,17 @@ public sealed class FreshnessGateTests
         DisplayName = id,
         State = ProviderState.Ok,
         SourceObservedAt = observedAt,
+        Gauges = [new UsageGauge("g", "Gauge", null, 50, null)],
+    };
+
+    /// <summary>A file-derived fetch that also names which of several local surfaces won.</summary>
+    private static ProviderUsage FromSource(string id, DateTimeOffset observedAt, string source) => new()
+    {
+        ProviderId = id,
+        DisplayName = id,
+        State = ProviderState.Ok,
+        SourceObservedAt = observedAt,
+        SourceLabel = source,
         Gauges = [new UsageGauge("g", "Gauge", null, 50, null)],
     };
 

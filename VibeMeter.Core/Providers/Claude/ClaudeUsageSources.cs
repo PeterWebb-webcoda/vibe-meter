@@ -8,6 +8,33 @@ using System.Threading.Tasks;
 namespace VibeMeter.Providers.Claude;
 
 /// <summary>
+/// Which local Claude surface a reading came from. The numeric order IS the preference
+/// order used by <see cref="ClaudeUsageSources.Merge"/> — lower wins.
+/// </summary>
+internal enum ClaudeUsageSource
+{
+    /// <summary>
+    /// The Claude Code CLI's <c>usage_cache.json</c>. Preferred unconditionally: it is the
+    /// only source carrying exact percentages, verbatim reset timestamps and model-scoped
+    /// weekly limits, and the CLI rewrites it on use rather than on a timer.
+    /// </summary>
+    CliCache = 0,
+
+    /// <summary>
+    /// A snapshot that did not declare its surface (only hand-built ones do). Ranked below
+    /// the CLI cache — nothing lets us claim it is as rich — but above a source we know to
+    /// be coarsely sampled.
+    /// </summary>
+    Unknown = 1,
+
+    /// <summary>
+    /// The Claude desktop app's <c>plan-usage-history.json</c>. The fallback: two
+    /// percentages, no reset times, and a sampling cadence measured in tens of minutes.
+    /// </summary>
+    DesktopHistory = 2,
+}
+
+/// <summary>
 /// One provider-agnostic reading of Claude plan utilisation, normalised from whichever
 /// local file happened to supply it.
 /// </summary>
@@ -18,6 +45,14 @@ namespace VibeMeter.Providers.Claude;
 /// True when the reset times were inferred from a sampled history rather than reported
 /// verbatim — they are then only accurate to the sampling interval.
 /// </param>
+/// <param name="Source">
+/// Which surface supplied the figures. Recorded so callers — the provider, the publishing
+/// side, the log — can say which one won rather than inferring it from the label.
+/// </param>
+/// <param name="SamplingInterval">
+/// How often this surface writes a reading, when it writes on a cadence rather than on
+/// demand. Null for a source rewritten on use (the CLI cache), whose age is simply its age.
+/// </param>
 internal sealed record ClaudeUsageSnapshot(
     DateTime ObservedAt,
     string SourceLabel,
@@ -27,11 +62,31 @@ internal sealed record ClaudeUsageSnapshot(
     int? SevenDayPercentUsed,
     DateTime? SevenDayResetAt,
     IReadOnlyList<ClaudeUsageLimit> ScopedLimits,
-    bool ResetTimesAreApproximate)
+    bool ResetTimesAreApproximate,
+    ClaudeUsageSource Source = ClaudeUsageSource.Unknown,
+    TimeSpan? SamplingInterval = null)
 {
     /// <summary>True when there is at least one figure worth painting a gauge for.</summary>
     public bool HasAnyUsage =>
         FiveHourPercentUsed.HasValue || SevenDayPercentUsed.HasValue || ScopedLimits.Count > 0;
+
+    /// <summary>
+    /// How old this reading may get before it stops describing "now" — judged by the source's
+    /// own cadence, not by one tolerance applied to everything.
+    /// </summary>
+    /// <remarks>
+    /// A sampled source is not stale merely for being between samples: at the desktop app's
+    /// measured 30-minute median, a 25-minute-old reading is the freshest that surface has
+    /// ever been able to offer. It only means the app has stopped once several samples in a
+    /// row have gone missing. A source rewritten on demand has no cadence to be between, so
+    /// it gets the flat allowance instead.
+    /// </remarks>
+    public TimeSpan MeaningfulFor => SamplingInterval is { } interval
+        ? interval * ClaudeUsageSources.MissedSampleAllowance
+        : ClaudeUsageSources.UnsampledSourceAllowance;
+
+    /// <summary>True when this reading is still current by its own source's standard.</summary>
+    public bool IsCurrentAt(DateTime now) => now - ObservedAt <= MeaningfulFor;
 }
 
 /// <summary>
@@ -46,15 +101,30 @@ internal sealed record ClaudeUsageSnapshot(
 /// source: exact percentages, exact reset timestamps, and model-scoped weekly limits.
 /// </description></item>
 /// <item><description>
-/// <b>Claude desktop app</b> — <c>%APPDATA%\Claude\plan-usage-history.json</c>. A rolling
-/// array of ~5-minutely samples holding only the two percentages; reset times have to be
-/// inferred from where the series drops.
+/// <b>Claude desktop app</b> — <c>plan-usage-history.json</c> under
+/// <see cref="Environment.SpecialFolder.ApplicationData"/>. That folder is
+/// <c>AppData\Roaming</c> on Windows but <c>~/.config</c> on Linux and
+/// <c>~/Library/Application Support</c> on macOS, so this source is <b>live on every
+/// platform</b> — not Windows-only, however much the old <c>%APPDATA%</c> shorthand
+/// suggested otherwise. A rolling array of samples holding only the two percentages; reset
+/// times have to be inferred from where the series drops.
 /// </description></item>
 /// </list>
 /// <para>
-/// Both describe the same subscription pool, so either is a valid read. We take whichever
-/// observed the account most recently and backfill any reset time the winner lacks from the
-/// other, provided that time is still in the future.
+/// <b>Cadence.</b> The desktop history was long documented here as "~5-minutely". Measured
+/// over 106 consecutive real samples spanning a week, the gap between samples has a
+/// <b>median of 30 minutes</b> (mean 93, min 10.6, max 840) and exceeds 20 minutes in 56% of
+/// cases — roughly six times slower than that claim. That is why
+/// <see cref="ClaudeUsageSnapshot.MeaningfulFor"/> judges this source against its own
+/// cadence rather than against a live source's tolerance.
+/// </para>
+/// <para>
+/// <b>Selection.</b> Both files describe the same subscription pool, so either is a valid
+/// read — but they are not equally good, and recency alone cannot express that. We prefer
+/// the CLI cache whenever it carries any usage at all, even when the desktop history holds a
+/// newer sample, and fall back to the desktop history only when the CLI cache is absent,
+/// unreadable, or carries no figures. Reset times the winner lacks are still backfilled from
+/// the loser, provided they are still in the future.
 /// </para>
 /// </remarks>
 internal static class ClaudeUsageSources
@@ -77,6 +147,28 @@ internal static class ClaudeUsageSources
     private const int ResetDropThreshold = 5;
 
     /// <summary>
+    /// How often the desktop app actually writes a sample, measured rather than assumed:
+    /// the median gap across 106 consecutive samples spanning a week. Not the mean (93 min),
+    /// which one 14-hour outage drags far off the typical case.
+    /// </summary>
+    internal static readonly TimeSpan DesktopSamplingInterval = TimeSpan.FromMinutes(30);
+
+    /// <summary>
+    /// How many samples a cadenced source may miss before we stop reading it as "the
+    /// current state, between samples" and start reading it as "the app has stopped".
+    /// Six intervals is three hours for the desktop history: comfortably past the observed
+    /// spread of normal gaps, well short of the 14-hour outage in the same data.
+    /// </summary>
+    internal const int MissedSampleAllowance = 6;
+
+    /// <summary>
+    /// The same allowance for a source with no cadence at all. The CLI cache is rewritten
+    /// whenever Claude Code runs, so its age is just its age; six hours is the point past
+    /// which a figure is worth flagging to the user rather than quietly showing.
+    /// </summary>
+    internal static readonly TimeSpan UnsampledSourceAllowance = TimeSpan.FromHours(6);
+
+    /// <summary>
     /// Every path we look in, in preference order — used both for reading and for telling
     /// the user where we looked when nothing was found.
     /// </summary>
@@ -97,7 +189,16 @@ internal static class ClaudeUsageSources
         }
     }
 
-    /// <summary>The desktop app's sampled plan-usage history.</summary>
+    /// <summary>
+    /// The desktop app's sampled plan-usage history.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="Environment.SpecialFolder.ApplicationData"/> is NOT Windows-only. It is
+    /// <c>AppData\Roaming</c> on Windows, <c>~/.config</c> on Linux and
+    /// <c>~/Library/Application Support</c> on macOS, so this source is live on every
+    /// platform we run on. Spelling it <c>%APPDATA%</c> here once hid a Linux-only
+    /// symptom for weeks.
+    /// </remarks>
     public static string DesktopHistoryPath => Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
         "Claude", "plan-usage-history.json");
@@ -109,27 +210,79 @@ internal static class ClaudeUsageSources
     /// Reads every available source and returns the best snapshot, or null when no source
     /// exists or none could be parsed.
     /// </summary>
-    public static async Task<ClaudeUsageSnapshot?> ReadBestAsync()
+    public static Task<ClaudeUsageSnapshot?> ReadBestAsync() =>
+        ReadBestAsync(CliCachePath, DesktopHistoryPath);
+
+    /// <summary>
+    /// Reads a named pair of files rather than the ones this machine happens to have.
+    /// A null path means "that surface is not installed here". Internal so tests can drive
+    /// the real readers and the real selection over captured fixtures without needing a
+    /// Claude install on the build agent; production always calls the parameterless
+    /// overload.
+    /// </summary>
+    internal static async Task<ClaudeUsageSnapshot?> ReadBestAsync(
+        string? cliCachePath,
+        string? desktopHistoryPath)
     {
         var snapshots = new List<ClaudeUsageSnapshot>();
 
-        if (await ReadCliCacheAsync() is { } cli) snapshots.Add(cli);
-        if (await ReadDesktopHistoryAsync() is { } desktop) snapshots.Add(desktop);
+        if (cliCachePath is not null && await ReadCliCacheAsync(cliCachePath) is { } cli)
+            snapshots.Add(cli);
+        if (desktopHistoryPath is not null && await ReadDesktopHistoryAsync(desktopHistoryPath) is { } desktop)
+            snapshots.Add(desktop);
 
         return Merge(snapshots);
     }
 
     /// <summary>
-    /// Picks the most recently observed snapshot and backfills reset times it is missing
-    /// from the others. Percentages are never mixed across sources — a blended reading
-    /// would be wrong for both.
+    /// Picks the best snapshot by SOURCE, not by recency, and backfills reset times it is
+    /// missing from the others. Percentages are never mixed across sources — a blended
+    /// reading would be wrong for both.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>The rule.</b> Discard any snapshot with no usage figures; of what remains, take
+    /// the one whose <see cref="ClaudeUsageSnapshot.Source"/> ranks highest
+    /// (<see cref="ClaudeUsageSource.CliCache"/> first), breaking a tie within one source by
+    /// recency. So the CLI cache wins whenever it is usable at all, even against a newer
+    /// desktop sample, and the desktop history is used only when the CLI cache is absent,
+    /// unreadable, or carries no figures.
+    /// </para>
+    /// <para>
+    /// <b>Why not recency.</b> Ordering purely by <c>ObservedAt</c> cannot express what this
+    /// file already knows — that the CLI cache is the richer source. On a Linux box where
+    /// the CLI had stopped rewriting its cache, a desktop sample a day newer won every
+    /// merge; its own timestamp then never advanced, so the merged reading sat permanently
+    /// past the agent's 20-minute freshness gate and the provider vanished from every
+    /// published snapshot, silently, at [warn]. The same trap exists on Windows: at the
+    /// desktop history's measured 30-minute median cadence, its sample is older than that
+    /// gate 56% of the time. Windows escapes only because its CLI cache stays fresh and
+    /// happens to win on recency — luck, not design.
+    /// </para>
+    /// <para>
+    /// <b>The trade-off.</b> Preferring rank over recency means we can now return a CLI
+    /// reading that is genuinely older than an available desktop one. That is deliberate,
+    /// and it is the honest answer: both readings then carry their true
+    /// <see cref="ClaudeUsageSnapshot.ObservedAt"/>, and the caller decides what to do about
+    /// age — the UI flags it, and the agent's freshness gate omits the provider rather than
+    /// publishing day-old figures stamped "now", which the collection API's newest-first
+    /// merge would let mask a fresher reading from another machine. Choosing the richer
+    /// source never makes that gate more permissive; it only stops a thin, slowly-sampled
+    /// source displacing a detailed one.
+    /// </para>
+    /// </remarks>
     internal static ClaudeUsageSnapshot? Merge(IReadOnlyList<ClaudeUsageSnapshot> snapshots)
     {
         var usable = snapshots.Where(s => s.HasAnyUsage).ToList();
         if (usable.Count == 0) return null;
 
-        var winner = usable.OrderByDescending(s => s.ObservedAt).First();
+        // Rank first, recency only as a tie-break within one source. Today there is at most
+        // one snapshot per source, so the tie-break never fires; it is here so that adding a
+        // third surface cannot make the choice depend on list order.
+        var winner = usable
+            .OrderBy(s => (int)s.Source)
+            .ThenByDescending(s => s.ObservedAt)
+            .First();
         var now = DateTime.Now;
 
         foreach (var other in usable.Where(s => !ReferenceEquals(s, winner)))
@@ -149,9 +302,8 @@ internal static class ClaudeUsageSources
 
     // --- Source 1: the CLI's usage cache -------------------------------------------------
 
-    private static async Task<ClaudeUsageSnapshot?> ReadCliCacheAsync()
+    private static async Task<ClaudeUsageSnapshot?> ReadCliCacheAsync(string path)
     {
-        var path = CliCachePath;
         if (!File.Exists(path)) return null;
 
         ClaudeUsageCacheFile? cache;
@@ -178,6 +330,11 @@ internal static class ClaudeUsageSources
             ObservedAt: ClaudeJson.ParseIso(cache?.Timestamp) ?? File.GetLastWriteTime(path),
             SourceLabel: CliSourceLabel,
             SourcePath: path,
+            Source: ClaudeUsageSource.CliCache,
+
+            // Written whenever Claude Code runs, not on a timer, so there is no cadence to
+            // be between: this reading's age means exactly what it says.
+            SamplingInterval: null,
             FiveHourPercentUsed: data.FiveHour?.UsedPercent,
             FiveHourResetAt: data.FiveHour?.ResetAt,
             SevenDayPercentUsed: data.SevenDay?.UsedPercent,
@@ -188,9 +345,8 @@ internal static class ClaudeUsageSources
 
     // --- Source 2: the desktop app's sampled history -------------------------------------
 
-    private static async Task<ClaudeUsageSnapshot?> ReadDesktopHistoryAsync()
+    private static async Task<ClaudeUsageSnapshot?> ReadDesktopHistoryAsync(string path)
     {
-        var path = DesktopHistoryPath;
         if (!File.Exists(path)) return null;
 
         ClaudePlanUsageHistoryFile? history;
@@ -225,6 +381,10 @@ internal static class ClaudeUsageSources
             ObservedAt: latest.ObservedAt,
             SourceLabel: DesktopSourceLabel,
             SourcePath: path,
+            Source: ClaudeUsageSource.DesktopHistory,
+
+            // Sampled, so being a little behind is its normal state rather than a fault.
+            SamplingInterval: DesktopSamplingInterval,
             FiveHourPercentUsed: Clamp(latest.Usage.FiveHour),
             FiveHourResetAt: DeriveReset(ordered, u => u.FiveHour, FiveHourWindow, now),
             SevenDayPercentUsed: Clamp(latest.Usage.SevenDay),

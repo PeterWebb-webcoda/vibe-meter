@@ -123,8 +123,9 @@ public sealed class FreshnessGate
             {
                 omissions.Add(
                     $"Provider '{usage.ProviderId}' omitted: its underlying data was observed " +
-                    $"{DescribeAge(age)} ago ({observedAt:yyyy-MM-dd HH:mm:ss zzz}), older than the " +
-                    $"{DescribeThreshold(_stalenessThreshold)} staleness threshold. Omitted rather than " +
+                    $"{DescribeAge(age)} ago ({observedAt:yyyy-MM-dd HH:mm:ss zzz}){DescribeSource(usage)}, " +
+                    $"older than the {DescribeThreshold(_stalenessThreshold)} staleness threshold. " +
+                    "Omitted rather than " +
                     "marked state=\"stale\" because the server's newest-first merge keys on observedAt " +
                     "(publish time) and would let this snapshot mask a fresher reading from another machine.");
                 continue;
@@ -135,6 +136,13 @@ public sealed class FreshnessGate
 
         return new FreshnessGateResult(publishable, omissions, notes);
     }
+
+    /// <summary>
+    /// Names the surface the reading came from, when the provider reads from more than one.
+    /// An omission is much easier to act on when the line says WHICH file was too old.
+    /// </summary>
+    private static string DescribeSource(ProviderUsage usage) =>
+        string.IsNullOrWhiteSpace(usage.SourceLabel) ? "" : $" from {usage.SourceLabel}";
 
     private static string DescribeAge(TimeSpan age) =>
         age.TotalHours >= 1 ? $"{age.TotalHours:0.#}h"

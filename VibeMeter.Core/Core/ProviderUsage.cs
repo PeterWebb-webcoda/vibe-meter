@@ -97,6 +97,22 @@ public sealed class ProviderUsage
     /// </remarks>
     public DateTimeOffset? SourceObservedAt { get; init; }
 
+    /// <summary>
+    /// Which local surface supplied the figures, for a provider that can read from more
+    /// than one (Claude reads either the Claude Code CLI cache or the desktop app's sampled
+    /// history). <see langword="null"/> when the provider has only one source, or fetches
+    /// live over HTTP.
+    /// </summary>
+    /// <remarks>
+    /// Purely informational, and deliberately additive: it is logged, and shown in the
+    /// card's tooltip, but it is NOT published — the collection API's snapshot contract has
+    /// no field for it, and the mapper reads only id, state, plan label and gauges. It
+    /// exists because "the provider was omitted as stale" is a different problem depending
+    /// on which of two sources was being judged, and nothing downstream could previously
+    /// tell them apart.
+    /// </remarks>
+    public string? SourceLabel { get; init; }
+
     /// <summary>Convenience factory for a "not yet implemented / coming soon" provider.</summary>
     public static ProviderUsage ComingSoon(string id, string displayName, string note) => new()
     {
