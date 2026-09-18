@@ -49,7 +49,7 @@ public sealed class ClaudeLiveUsageTests : IDisposable
     private static readonly string FixtureDirectory =
         Path.Combine(AppContext.BaseDirectory, "Providers", "Claude", "Fixtures");
 
-    private static string GladuxCliCache => Path.Combine(FixtureDirectory, "gladux-usage_cache.json");
+    private static string LinuxCliCache => Path.Combine(FixtureDirectory, "linux-usage_cache.json");
 
     /// <summary>The CLI fixture's own figures: <c>five_hour.utilization</c> 14, seven-day 77.</summary>
     private const int CliCacheFiveHourUsed = 14;
@@ -196,14 +196,14 @@ public sealed class ClaudeLiveUsageTests : IDisposable
         using var handler = StubHandler.Serving(HttpStatusCode.OK, UsageResponse());
 
         var attempt = await AttemptAsync(dir, handler);
-        var chosen = await ClaudeUsageSources.ReadBestAsync(attempt.Snapshot, GladuxCliCache, null);
+        var chosen = await ClaudeUsageSources.ReadBestAsync(attempt.Snapshot, LinuxCliCache, null);
 
         Assert.Equal(ClaudeUsageSource.LiveApi, chosen!.Source);
         Assert.Equal(LiveFiveHourUsed, chosen.FiveHourPercentUsed);
 
         // The premise, asserted rather than assumed: the CLI cache really does hold a
         // different figure, so this is a selection and not a coincidence.
-        var fileOnly = await ClaudeUsageSources.ReadBestAsync(null, GladuxCliCache, null);
+        var fileOnly = await ClaudeUsageSources.ReadBestAsync(null, LinuxCliCache, null);
         Assert.Equal(CliCacheFiveHourUsed, fileOnly!.FiveHourPercentUsed);
     }
 
@@ -296,7 +296,7 @@ public sealed class ClaudeLiveUsageTests : IDisposable
         // is nothing to tell the user about.
         Assert.Null(attempt.Note);
 
-        var chosen = await ClaudeUsageSources.ReadBestAsync(attempt.Snapshot, GladuxCliCache, null);
+        var chosen = await ClaudeUsageSources.ReadBestAsync(attempt.Snapshot, LinuxCliCache, null);
         Assert.Equal(ClaudeUsageSource.CliCache, chosen!.Source);
         Assert.Equal(CliCacheFiveHourUsed, chosen.FiveHourPercentUsed);
     }
@@ -318,7 +318,7 @@ public sealed class ClaudeLiveUsageTests : IDisposable
         // precisely for it.
         Assert.Null(attempt.Note);
 
-        var chosen = await ClaudeUsageSources.ReadBestAsync(attempt.Snapshot, GladuxCliCache, null);
+        var chosen = await ClaudeUsageSources.ReadBestAsync(attempt.Snapshot, LinuxCliCache, null);
         Assert.Equal(ClaudeUsageSource.CliCache, chosen!.Source);
     }
 
@@ -397,7 +397,7 @@ public sealed class ClaudeLiveUsageTests : IDisposable
         // End to end through the provider: the reading the hosts log and publish carries
         // both the winning source and, when the live source lost, the reason it lost.
         var dir = WriteCredentials(CredentialsJson());
-        File.Copy(GladuxCliCache, Path.Combine(dir, "usage_cache.json"));
+        File.Copy(LinuxCliCache, Path.Combine(dir, "usage_cache.json"));
         using var handler = StubHandler.Serving(status, UsageResponse());
         var provider = new ClaudeProvider(
             new ClaudeAuth(),
@@ -434,7 +434,7 @@ public sealed class ClaudeLiveUsageTests : IDisposable
         // constraint, against a transport that completes OFF that thread, and requires the
         // live reading to come back — on the pump thread, as the dispatcher would deliver it.
         var dir = WriteCredentials(CredentialsJson());
-        File.Copy(GladuxCliCache, Path.Combine(dir, "usage_cache.json"));
+        File.Copy(LinuxCliCache, Path.Combine(dir, "usage_cache.json"));
         using var handler = new OffThreadHandler(HttpStatusCode.OK, UsageResponse());
         var provider = new ClaudeProvider(
             new ClaudeAuth(),
@@ -469,7 +469,7 @@ public sealed class ClaudeLiveUsageTests : IDisposable
         Assert.Null(attempt.Snapshot);
         Assert.Null(attempt.Note);
 
-        var chosen = await ClaudeUsageSources.ReadBestAsync(attempt.Snapshot, GladuxCliCache, null);
+        var chosen = await ClaudeUsageSources.ReadBestAsync(attempt.Snapshot, LinuxCliCache, null);
         Assert.Equal(ClaudeUsageSource.CliCache, chosen!.Source);
     }
 
@@ -491,7 +491,7 @@ public sealed class ClaudeLiveUsageTests : IDisposable
         Assert.Contains("/login", attempt.Note, StringComparison.Ordinal);
 
         // And it still falls back, so the card keeps working.
-        var chosen = await ClaudeUsageSources.ReadBestAsync(attempt.Snapshot, GladuxCliCache, null);
+        var chosen = await ClaudeUsageSources.ReadBestAsync(attempt.Snapshot, LinuxCliCache, null);
         Assert.Equal(ClaudeUsageSource.CliCache, chosen!.Source);
     }
 
@@ -510,7 +510,7 @@ public sealed class ClaudeLiveUsageTests : IDisposable
         Assert.NotNull(attempt.Note);
         Assert.Contains("/login", attempt.Note!, StringComparison.Ordinal);
 
-        var chosen = await ClaudeUsageSources.ReadBestAsync(attempt.Snapshot, GladuxCliCache, null);
+        var chosen = await ClaudeUsageSources.ReadBestAsync(attempt.Snapshot, LinuxCliCache, null);
         Assert.Equal(ClaudeUsageSource.CliCache, chosen!.Source);
     }
 

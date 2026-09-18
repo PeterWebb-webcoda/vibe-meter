@@ -111,7 +111,7 @@ public sealed class ClaudeRateLimitRegressionTests : IDisposable
               }
             }
             """);
-        File.Copy(Path.Combine(FixtureDirectory, "gladux-usage_cache.json"), Path.Combine(_scratch, "usage_cache.json"));
+        File.Copy(Path.Combine(FixtureDirectory, "linux-usage_cache.json"), Path.Combine(_scratch, "usage_cache.json"));
         return _scratch;
     }
 

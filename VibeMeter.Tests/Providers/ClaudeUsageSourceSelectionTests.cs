@@ -8,7 +8,7 @@ namespace VibeMeter.Tests.Providers;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The regression these pin was found on a Linux box ("Gladux"), where the provider was
+/// The regression these pin was found on a Linux box ("Linux"), where the provider was
 /// omitted from every published snapshot by the agent's 20-minute freshness gate — for
 /// weeks, silently, at [warn]. Both local sources were valid; the selection between them
 /// was not.
@@ -35,16 +35,16 @@ public sealed class ClaudeUsageSourceSelectionTests : IDisposable
 
     private static string Fixture(string name) => Path.Combine(FixtureDirectory, name);
 
-    private static string GladuxCliCache => Fixture("gladux-usage_cache.json");
-    private static string GladuxDesktopHistory => Fixture("gladux-plan-usage-history.json");
+    private static string LinuxCliCache => Fixture("linux-usage_cache.json");
+    private static string LinuxDesktopHistory => Fixture("linux-plan-usage-history.json");
     private static string WindowsCliCacheWithBom => Fixture("windows-usage_cache-bom.json");
 
-    /// <summary>Gladux's CLI cache: <c>"timestamp": "2026-09-17T02:07:48.544Z"</c>.</summary>
-    private static readonly DateTime GladuxCliObservedAt =
+    /// <summary>Linux's CLI cache: <c>"timestamp": "2026-09-17T02:07:48.544Z"</c>.</summary>
+    private static readonly DateTime LinuxCliObservedAt =
         new DateTimeOffset(2026, 9, 17, 2, 7, 48, 544, TimeSpan.Zero).LocalDateTime;
 
-    /// <summary>Gladux's newest desktop sample: <c>"t": 1789720448590</c>.</summary>
-    private static readonly DateTime GladuxDesktopObservedAt =
+    /// <summary>Linux's newest desktop sample: <c>"t": 1789720448590</c>.</summary>
+    private static readonly DateTime LinuxDesktopObservedAt =
         DateTimeOffset.FromUnixTimeMilliseconds(1789720448590).LocalDateTime;
 
     /// <summary>Scratch space for the degenerate caches, which are easier built than stored.</summary>
@@ -74,17 +74,17 @@ public sealed class ClaudeUsageSourceSelectionTests : IDisposable
     // ------------------------------------------------------------------ the regression
 
     [Fact]
-    public async Task Gladux_TheCliCacheWins_EvenThoughTheDesktopSampleIsADayNewer()
+    public async Task Linux_TheCliCacheWins_EvenThoughTheDesktopSampleIsADayNewer()
     {
         // The premise, asserted rather than assumed: the desktop sample really is the
         // newer of the two, which is exactly why ordering by ObservedAt chose it.
         Assert.True(
-            GladuxDesktopObservedAt > GladuxCliObservedAt,
+            LinuxDesktopObservedAt > LinuxCliObservedAt,
             "fixture premise: the desktop sample must be newer than the CLI cache");
 
         var snapshot = await ClaudeUsageSources.ReadBestAsync(
-            cliCachePath: GladuxCliCache,
-            desktopHistoryPath: GladuxDesktopHistory);
+            cliCachePath: LinuxCliCache,
+            desktopHistoryPath: LinuxDesktopHistory);
 
         Assert.NotNull(snapshot);
 
@@ -92,26 +92,26 @@ public sealed class ClaudeUsageSourceSelectionTests : IDisposable
         // model-scoped weekly limits — and must win whenever it is usable at all.
         Assert.Equal("Claude Code CLI cache", snapshot!.SourceLabel);
         Assert.Equal(ClaudeUsageSource.CliCache, snapshot.Source);
-        Assert.Equal(GladuxCliObservedAt, snapshot.ObservedAt);
+        Assert.Equal(LinuxCliObservedAt, snapshot.ObservedAt);
         Assert.Equal(14, snapshot.FiveHourPercentUsed);
         Assert.Equal(77, snapshot.SevenDayPercentUsed);
         Assert.False(snapshot.ResetTimesAreApproximate);
     }
 
     [Fact]
-    public async Task Gladux_TheReadingIsStillDroppedByTheGate_BecauseNeitherSourceIsFresh()
+    public async Task Linux_TheReadingIsStillDroppedByTheGate_BecauseNeitherSourceIsFresh()
     {
         // Documents the rest of the mechanism, and the limit of this fix. Choosing the
-        // right source does not conjure fresh data: on Gladux the CLI cache had not been
+        // right source does not conjure fresh data: on Linux the CLI cache had not been
         // rewritten for a day either, so the provider is still — correctly — omitted. The
         // fix stops a thin source DISPLACING a rich one; it does not, and must not, relax
         // the gate, because publishing day-old figures stamped "now" would mask the good
         // machine's reading under the server's newest-first merge.
         var snapshot = await ClaudeUsageSources.ReadBestAsync(
-            cliCachePath: GladuxCliCache,
-            desktopHistoryPath: GladuxDesktopHistory);
+            cliCachePath: LinuxCliCache,
+            desktopHistoryPath: LinuxDesktopHistory);
 
-        var justAfterTheNewestSample = GladuxDesktopObservedAt.AddMinutes(21);
+        var justAfterTheNewestSample = LinuxDesktopObservedAt.AddMinutes(21);
         Assert.True(justAfterTheNewestSample - snapshot!.ObservedAt > TimeSpan.FromMinutes(20));
     }
 
@@ -122,12 +122,12 @@ public sealed class ClaudeUsageSourceSelectionTests : IDisposable
     {
         var snapshot = await ClaudeUsageSources.ReadBestAsync(
             cliCachePath: null,
-            desktopHistoryPath: GladuxDesktopHistory);
+            desktopHistoryPath: LinuxDesktopHistory);
 
         Assert.NotNull(snapshot);
         Assert.Equal(ClaudeUsageSource.DesktopHistory, snapshot!.Source);
         Assert.Equal("Claude desktop app history", snapshot.SourceLabel);
-        Assert.Equal(GladuxDesktopObservedAt, snapshot.ObservedAt);
+        Assert.Equal(LinuxDesktopObservedAt, snapshot.ObservedAt);
 
         // The newest sample in the captured file: { "fh": 27, "sd": 26 }.
         Assert.Equal(27, snapshot.FiveHourPercentUsed);
@@ -143,7 +143,7 @@ public sealed class ClaudeUsageSourceSelectionTests : IDisposable
         // The realistic desktop-only machine: the path is computed but no file is there.
         var snapshot = await ClaudeUsageSources.ReadBestAsync(
             cliCachePath: Path.Combine(_scratch, "does-not-exist", "usage_cache.json"),
-            desktopHistoryPath: GladuxDesktopHistory);
+            desktopHistoryPath: LinuxDesktopHistory);
 
         Assert.Equal(ClaudeUsageSource.DesktopHistory, snapshot!.Source);
     }
@@ -167,7 +167,7 @@ public sealed class ClaudeUsageSourceSelectionTests : IDisposable
         // have perfectly good figures.
         var torn = WriteScratch("usage_cache.json", "{ \"timestamp\": \"2026-09-18T08:3");
 
-        var snapshot = await ClaudeUsageSources.ReadBestAsync(torn, GladuxDesktopHistory);
+        var snapshot = await ClaudeUsageSources.ReadBestAsync(torn, LinuxDesktopHistory);
 
         Assert.Equal(ClaudeUsageSource.DesktopHistory, snapshot!.Source);
         Assert.Equal(27, snapshot.FiveHourPercentUsed);
@@ -186,7 +186,7 @@ public sealed class ClaudeUsageSourceSelectionTests : IDisposable
             }
             """);
 
-        var snapshot = await ClaudeUsageSources.ReadBestAsync(empty, GladuxDesktopHistory);
+        var snapshot = await ClaudeUsageSources.ReadBestAsync(empty, LinuxDesktopHistory);
 
         Assert.Equal(ClaudeUsageSource.DesktopHistory, snapshot!.Source);
         Assert.Equal(27, snapshot.FiveHourPercentUsed);
@@ -216,7 +216,7 @@ public sealed class ClaudeUsageSourceSelectionTests : IDisposable
 
         var snapshot = await ClaudeUsageSources.ReadBestAsync(
             cliCachePath: WindowsCliCacheWithBom,
-            desktopHistoryPath: GladuxDesktopHistory);
+            desktopHistoryPath: LinuxDesktopHistory);
 
         Assert.NotNull(snapshot);
         Assert.Equal(ClaudeUsageSource.CliCache, snapshot!.Source);
@@ -288,7 +288,7 @@ public sealed class ClaudeUsageSourceSelectionTests : IDisposable
     [Fact]
     public async Task TheDesktopHistoryIsJudgedByItsOwnCadence_NotALiveSourcesTolerance()
     {
-        var desktop = await ClaudeUsageSources.ReadBestAsync(null, GladuxDesktopHistory);
+        var desktop = await ClaudeUsageSources.ReadBestAsync(null, LinuxDesktopHistory);
 
         // Its measured median gap is 30 minutes, so a reading 25 minutes old is the
         // freshest that surface has ever been able to offer — not a fault.
