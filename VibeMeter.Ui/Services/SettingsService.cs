@@ -98,7 +98,7 @@ public class SettingsService
                 return true;
             }
 
-            var json = File.ReadAllText(_settingsFilePath);
+            var json = ReadSharing(_settingsFilePath);
             read = JsonSerializer.Deserialize<SettingsData>(json, JsonOptions) ?? new SettingsData();
         }
         catch
@@ -141,6 +141,28 @@ public class SettingsService
     }
 
     /// <summary>
+    /// Reads the file while still allowing <see cref="Save"/> to replace it underneath us.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="File.ReadAllText(string)"/> opens with <c>FileShare.Read</c>, which on
+    /// Windows denies the rename in Save: MoveFileEx refuses to replace a destination that
+    /// anyone holds open, and the caller sees UnauthorizedAccessException. POSIX rename(2)
+    /// has no such rule, so the atomic save worked on Linux and threw on Windows in exactly
+    /// the concurrent case it was written for. Sharing Delete as well as ReadWrite gives
+    /// Windows the same semantics Linux already had.
+    /// </remarks>
+    private static string ReadSharing(string path)
+    {
+        using var stream = new FileStream(
+            path,
+            FileMode.Open,
+            FileAccess.Read,
+            FileShare.ReadWrite | FileShare.Delete);
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+
+    /// <summary>
     /// Writes the settings file whole, atomically.
     /// </summary>
     /// <remarks>
@@ -158,7 +180,22 @@ public class SettingsService
         var temp = _settingsFilePath + ".tmp";
         File.WriteAllText(temp, json);
         RestrictToOwner(temp);
-        File.Move(temp, _settingsFilePath, overwrite: true);
+
+        // File.Replace, not File.Move(overwrite). On Unix either is rename(2) and both
+        // work, but on Windows File.Move is MoveFileEx, which refuses to replace a
+        // destination anyone holds open — the exact case this method exists to make safe,
+        // so the atomic save threw on Windows precisely when it mattered. ReplaceFile is
+        // the API for that, and it needs the reader to share Delete as well: measured, both
+        // halves are required and neither works alone. See ReadSharing.
+        if (File.Exists(_settingsFilePath))
+        {
+            File.Replace(temp, _settingsFilePath, null, ignoreMetadataErrors: true);
+        }
+        else
+        {
+            // Nothing to replace on the first save, and Replace demands a destination.
+            File.Move(temp, _settingsFilePath);
+        }
 
         RestrictToOwner();
     }
