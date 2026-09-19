@@ -2,15 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
-using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using VibeMeter.Core;
-using VibeMeter.Models;
+using VibeMeter.Ui.Models;
 using VibeMeter.Providers.Claude;
 using VibeMeter.Providers.Codex;
 using VibeMeter.Providers.Google;
 
-namespace VibeMeter.ViewModels;
+namespace VibeMeter.Ui.ViewModels;
 
 /// <summary>
 /// Observable, UI-facing wrapper around one provider's latest
@@ -84,9 +83,7 @@ public sealed partial class ProviderViewModel : ObservableObject
     public bool IsEnabled { get; set; } = true;
 
     /// <summary>Brand accent colour for this provider's card.</summary>
-    public Color Accent => ProviderAccent.For(Id);
-
-    public SolidColorBrush AccentBrush => new(Accent);
+    public Rgb Accent => ProviderAccent.For(Id);
 
     public ProviderViewModel(IUsageProvider provider)
     {
@@ -274,13 +271,13 @@ public sealed partial class ProviderViewModel : ObservableObject
 /// <summary>Brand accent colours keyed by provider id.</summary>
 public static class ProviderAccent
 {
-    public static Color For(string providerId) => providerId switch
+    public static Rgb For(string providerId) => providerId switch
     {
-        "codex"   => Color.FromRgb(64, 194, 232),   // aurora blue
-        "claude"  => Color.FromRgb(217, 119, 87),   // Anthropic coral
-        "zai"     => Color.FromRgb(124, 92, 255),   // GLM purple
-        "google"  => Color.FromRgb(66, 133, 244),   // Google blue
-        _         => Color.FromRgb(160, 176, 192)
+        "codex"   => Rgb.FromRgb(64, 194, 232),   // aurora blue
+        "claude"  => Rgb.FromRgb(217, 119, 87),   // Anthropic coral
+        "zai"     => Rgb.FromRgb(124, 92, 255),   // GLM purple
+        "google"  => Rgb.FromRgb(66, 133, 244),   // Google blue
+        _         => Rgb.FromRgb(160, 176, 192)
     };
 }
 

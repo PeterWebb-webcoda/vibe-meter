@@ -1,7 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
-using VibeMeter.Models;
-using VibeMeter.ViewModels;
+using VibeMeter.Ui.Models;
+using VibeMeter.Ui.ViewModels;
 
 namespace VibeMeter.Views;
 

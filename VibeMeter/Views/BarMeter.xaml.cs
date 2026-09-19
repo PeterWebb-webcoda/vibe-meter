@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
-using VibeMeter.Models;
+using System.Windows.Media;
+using VibeMeter.Ui.Models;
 
 namespace VibeMeter.Views;
 
@@ -62,6 +63,6 @@ public partial class BarMeter : UserControl
         var parentGrid = FillBar.Parent as Grid;
         double trackWidth = parentGrid?.ActualWidth ?? 0;
         FillBar.Width = trackWidth * data.Ratio;
-        FillBar.Fill = data.StatusBrush;
+        FillBar.Fill = new SolidColorBrush(data.StatusColor.ToMediaColor());
     }
 }

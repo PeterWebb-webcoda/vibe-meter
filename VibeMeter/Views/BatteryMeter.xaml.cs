@@ -1,7 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
-using VibeMeter.Models;
+using VibeMeter.Ui.Models;
 
 namespace VibeMeter.Views;
 
@@ -57,6 +57,6 @@ public partial class BatteryMeter : UserControl
         ResetTextBlock.Text = data.ResetText;
 
         FillBorder.Width = FillMaxWidth * data.Ratio;
-        FillBrush.Color = data.StatusBrush.Color;
+        FillBrush.Color = data.StatusColor.ToMediaColor();
     }
 }

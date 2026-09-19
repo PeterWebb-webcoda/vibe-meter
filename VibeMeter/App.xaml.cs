@@ -4,8 +4,8 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Threading;
 using Hardcodet.Wpf.TaskbarNotification;
-using VibeMeter.Services;
-using VibeMeter.ViewModels;
+using VibeMeter.Ui.Services;
+using VibeMeter.Ui.ViewModels;
 using VibeMeter.Views;
 
 namespace VibeMeter;

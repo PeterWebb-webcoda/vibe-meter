@@ -27,7 +27,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
     <PackageReference Include="Hardcodet.NotifyIcon.Wpf" Version="2.0.1" />
   </ItemGroup>
 
@@ -37,6 +36,11 @@
          headless agent. The library is deliberately platform-neutral (net10.0),
          so referencing it costs this WPF app nothing but the MSAL dependency. -->
     <ProjectReference Include="..\VibeMeter.Publishing\VibeMeter.Publishing.csproj" />
+    <!-- Shared UI logic (view models, models, services), platform-neutral so a
+         future Avalonia app can reference the same library. CommunityToolkit.Mvvm
+         now flows from here; the brushes the XAML binds to are produced at the
+         rendering edge by RgbToBrushConverter / RgbExtensions. -->
+    <ProjectReference Include="..\VibeMeter.Ui\VibeMeter.Ui.csproj" />
   </ItemGroup>
 
 </Project>

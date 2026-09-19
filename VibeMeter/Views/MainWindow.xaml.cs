@@ -3,8 +3,8 @@ using System.ComponentModel;
 using System.Windows;
 using Microsoft.Win32;
 using System.Windows.Input;
-using VibeMeter.Services;
-using VibeMeter.ViewModels;
+using VibeMeter.Ui.Services;
+using VibeMeter.Ui.ViewModels;
 
 namespace VibeMeter.Views;
 

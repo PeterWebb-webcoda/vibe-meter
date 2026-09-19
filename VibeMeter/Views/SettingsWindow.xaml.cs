@@ -1,5 +1,5 @@
 using System.Windows;
-using VibeMeter.ViewModels;
+using VibeMeter.Ui.ViewModels;
 
 namespace VibeMeter.Views;
 

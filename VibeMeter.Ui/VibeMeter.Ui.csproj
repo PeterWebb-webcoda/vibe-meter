@@ -1,0 +1,30 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <!-- Deliberately NOT net10.0-windows: this library holds the shared UI
+         logic (view models, models, services) so a future Avalonia app can
+         reference it alongside the WPF one. No WPF/Windows types may appear
+         here; colours are carried by the platform-neutral Rgb type. -->
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="CommunityToolkit.Mvvm" Version="8.4.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VibeMeter.Core\VibeMeter.Core.csproj" />
+    <ProjectReference Include="..\VibeMeter.Publishing\VibeMeter.Publishing.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The WPF host consumes the internal tray/publish glue that lives here
+         (TrayPublishing, ErrorLogPublishLog). The Avalonia host consumes the
+         SAME glue (rather than forking the queue/token-cache paths) for its
+         identical tray+publish role on Linux. -->
+    <InternalsVisibleTo Include="VibeMeter" />
+  </ItemGroup>
+
+</Project>

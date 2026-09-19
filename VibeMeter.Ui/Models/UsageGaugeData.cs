@@ -1,7 +1,6 @@
 using System;
-using System.Windows.Media;
 
-namespace VibeMeter.Models;
+namespace VibeMeter.Ui.Models;
 
 /// <summary>
 /// UI-facing gauge data consumed by the meter controls. Mapped from
@@ -25,17 +24,16 @@ public class UsageGaugeData
     /// <summary>
     /// Green (50–100 %), amber (20–49 %), red (0–19 %).
     /// </summary>
-    public SolidColorBrush StatusBrush
+    public Rgb StatusColor
     {
         get
         {
-            var colour = ClampedPercent switch
+            return ClampedPercent switch
             {
-                >= 50 => Color.FromRgb(64, 200, 115),
-                >= 20 => Color.FromRgb(245, 173, 56),
-                _     => Color.FromRgb(245, 72, 64)
+                >= 50 => Rgb.FromRgb(64, 200, 115),
+                >= 20 => Rgb.FromRgb(245, 173, 56),
+                _     => Rgb.FromRgb(245, 72, 64)
             };
-            return new SolidColorBrush(colour);
         }
     }
 

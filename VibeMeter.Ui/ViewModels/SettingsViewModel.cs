@@ -4,10 +4,10 @@ using System.Collections.ObjectModel;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
-using VibeMeter.Models;
-using VibeMeter.Services;
+using VibeMeter.Ui.Models;
+using VibeMeter.Ui.Services;
 
-namespace VibeMeter.ViewModels;
+namespace VibeMeter.Ui.ViewModels;
 
 public partial class SettingsViewModel : ObservableObject
 {

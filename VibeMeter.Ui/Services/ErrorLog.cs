@@ -2,7 +2,7 @@ using System;
 using System.IO;
 using System.Text;
 
-namespace VibeMeter.Services;
+namespace VibeMeter.Ui.Services;
 
 /// <summary>
 /// Appends provider error details to <c>%APPDATA%\VibeMeter\logs\error.log</c>. One line

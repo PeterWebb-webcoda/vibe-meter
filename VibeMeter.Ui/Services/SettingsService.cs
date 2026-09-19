@@ -2,10 +2,10 @@ using System;
 using System.IO;
 using System.Text.Json;
 using VibeMeter.Core.Security;
-using VibeMeter.Models;
+using VibeMeter.Ui.Models;
 using VibeMeter.Providers.Google;
 
-namespace VibeMeter.Services;
+namespace VibeMeter.Ui.Services;
 
 /// <summary>
 /// Loads and saves <see cref="SettingsData"/> to

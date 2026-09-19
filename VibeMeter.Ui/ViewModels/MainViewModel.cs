@@ -2,16 +2,16 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Linq;
+using System.Threading;
 using System.Threading.Tasks;
-using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using VibeMeter.Core;
-using VibeMeter.Models;
+using VibeMeter.Ui.Models;
 using VibeMeter.Providers.Google;
-using VibeMeter.Services;
+using VibeMeter.Ui.Services;
 
-namespace VibeMeter.ViewModels;
+namespace VibeMeter.Ui.ViewModels;
 
 public partial class MainViewModel : ObservableObject
 {
@@ -21,10 +21,18 @@ public partial class MainViewModel : ObservableObject
 
     /// <summary>
     /// Where each refresh's reports are sent, or null when the user has not
-    /// opted in to publishing (the default). Owned and replaced by
-    /// <see cref="App"/>, which holds the tray icon the sign-in prompt needs.
+    /// opted in to publishing (the default). Owned and replaced by the
+    /// host app, which holds the tray icon the sign-in prompt needs.
     /// </summary>
     private VibeMeter.Publishing.DesktopPublishHost? _publishHost;
+
+    /// <summary>
+    /// The UI thread this view model was created on, so background fetches
+    /// can marshal each card update back to it. The WPF app constructs this
+    /// view model on its dispatcher thread, where the context is the
+    /// dispatcher's own; a null context (a headless host) skips the marshal.
+    /// </summary>
+    private readonly SynchronizationContext? _uiContext = SynchronizationContext.Current;
 
     /// <summary>
     /// Notices when a provider starts, stops or changes reading from a fallback source, so
@@ -65,9 +73,9 @@ public partial class MainViewModel : ObservableObject
         .GetEntryAssembly()?.GetName().Version?.ToString(3) ?? "0.0.0");
 
     public WidgetTint CurrentTint => WidgetTint.All[TintIndex % WidgetTint.All.Count];
-    public SolidColorBrush TintPrimaryBrush => new(CurrentTint.Primary);
-    public SolidColorBrush TintSecondaryBrush => new(CurrentTint.Secondary);
-    public SolidColorBrush TintGlowBrush => new(CurrentTint.Glow);
+    public Rgb TintPrimary => CurrentTint.Primary;
+    public Rgb TintSecondary => CurrentTint.Secondary;
+    public Rgb TintGlow => CurrentTint.Glow;
 
     // --- Constructors ---
 
@@ -157,7 +165,7 @@ public partial class MainViewModel : ObservableObject
                 ErrorLog.Write(provider.Id, provider.DisplayName, sourceNote);
             }
 
-            System.Windows.Application.Current?.Dispatcher.Invoke(() => card.Apply(usage));
+            _uiContext?.Send(_ => card.Apply(usage), null);
             return usage;
         });
 
@@ -180,9 +188,9 @@ public partial class MainViewModel : ObservableObject
         _settingsService.Save(_settings);
 
         OnPropertyChanged(nameof(CurrentTint));
-        OnPropertyChanged(nameof(TintPrimaryBrush));
-        OnPropertyChanged(nameof(TintSecondaryBrush));
-        OnPropertyChanged(nameof(TintGlowBrush));
+        OnPropertyChanged(nameof(TintPrimary));
+        OnPropertyChanged(nameof(TintSecondary));
+        OnPropertyChanged(nameof(TintGlow));
     }
 
     [RelayCommand]
@@ -264,8 +272,8 @@ public partial class MainViewModel : ObservableObject
     }
 
     /// <summary>
-    /// Points the refresh at a publish host, or at nothing. Called by
-    /// <see cref="App"/> at startup and again whenever the publishing settings
+    /// Points the refresh at a publish host, or at nothing. Called by the
+    /// host app at startup and again whenever the publishing settings
     /// are saved, so switching the feature on takes effect without a restart.
     /// </summary>
     public void UsePublishHost(VibeMeter.Publishing.DesktopPublishHost? host) => _publishHost = host;

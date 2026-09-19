@@ -2,7 +2,7 @@ using System;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
-using VibeMeter.Models;
+using VibeMeter.Ui.Models;
 
 namespace VibeMeter.Views;
 
@@ -102,7 +102,7 @@ public partial class CircularMeter : UserControl
                 ArcPath.Data = geometry;
             }
 
-            ArcPath.Stroke = data.StatusBrush;
+            ArcPath.Stroke = new SolidColorBrush(data.StatusColor.ToMediaColor());
         }
 
         // Draw reset countdown inner circle if possible

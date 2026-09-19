@@ -7,7 +7,7 @@ using VibeMeter.Providers.Codex;
 using VibeMeter.Providers.Google;
 using VibeMeter.Providers.Zai;
 
-namespace VibeMeter.Services;
+namespace VibeMeter.Ui.Services;
 
 /// <summary>
 /// The single place where every <see cref="IUsageProvider"/> is registered.

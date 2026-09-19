@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using VibeMeter.Providers.Google;
 
-namespace VibeMeter.Models;
+namespace VibeMeter.Ui.Models;
 
 /// <summary>
 /// Persisted user preferences, stored in %APPDATA%\VibeMeter\settings.json.

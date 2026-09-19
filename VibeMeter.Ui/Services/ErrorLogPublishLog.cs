@@ -1,6 +1,6 @@
 using VibeMeter.Publishing;
 
-namespace VibeMeter.Services;
+namespace VibeMeter.Ui.Services;
 
 /// <summary>
 /// Routes the publishing library's events into the log the app already keeps,

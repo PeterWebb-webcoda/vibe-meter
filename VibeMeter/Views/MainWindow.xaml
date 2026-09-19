@@ -4,8 +4,8 @@
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:VibeMeter.Views"
-        xmlns:vm="clr-namespace:VibeMeter.ViewModels"
-        xmlns:models="clr-namespace:VibeMeter.Models"
+        xmlns:vm="clr-namespace:VibeMeter.Ui.ViewModels;assembly=VibeMeter.Ui"
+        xmlns:models="clr-namespace:VibeMeter.Ui.Models;assembly=VibeMeter.Ui"
         mc:Ignorable="d"
         Title="Vibe Meter"
         WindowStyle="None"
@@ -21,6 +21,7 @@
     <Window.Resources>
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
         <local:PercentToWidthConverter x:Key="PctToWidth" />
+        <local:RgbToBrushConverter x:Key="RgbToBrush" />
 
         <DataTemplate x:Key="CircularMeterTemplate" DataType="{x:Type models:UsageGaugeData}">
             <local:CircularMeter Gauge="{Binding}" Margin="0,2"/>
@@ -95,7 +96,7 @@
                 <StackPanel>
                     <!-- Provider short name -->
                     <DockPanel Margin="0,0,0,4">
-                        <Ellipse Width="8" Height="8" Fill="{Binding AccentBrush}"
+                        <Ellipse Width="8" Height="8" Fill="{Binding Accent, Converter={StaticResource RgbToBrush}}"
                                  DockPanel.Dock="Left" Margin="0,0,4,0" VerticalAlignment="Center"/>
                         <TextBlock Text="{Binding ShortName}"
                                    FontSize="11" FontWeight="SemiBold" Foreground="#A0FFFFFF" VerticalAlignment="Center"/>
@@ -114,7 +115,7 @@
                             </DockPanel>
                             <Grid Height="4" Margin="0,2,0,0">
                                 <Border Background="#20FFFFFF" CornerRadius="2"/>
-                                <Border Background="{Binding AccentBrush}" CornerRadius="2"
+                                <Border Background="{Binding Accent, Converter={StaticResource RgbToBrush}}" CornerRadius="2"
                                         HorizontalAlignment="Left"
                                         Width="{Binding FiveHourPercent, Converter={StaticResource PctToWidth}, ConverterParameter=64}"/>
                             </Grid>
@@ -131,7 +132,7 @@
                             </DockPanel>
                             <Grid Height="4" Margin="0,2,0,0">
                                 <Border Background="#20FFFFFF" CornerRadius="2"/>
-                                <Border Background="{Binding AccentBrush}" CornerRadius="2"
+                                <Border Background="{Binding Accent, Converter={StaticResource RgbToBrush}}" CornerRadius="2"
                                         HorizontalAlignment="Left"
                                         Width="{Binding WeeklyPercent, Converter={StaticResource PctToWidth}, ConverterParameter=64}"/>
                             </Grid>
@@ -215,7 +216,7 @@
                             <Button.Template>
                                 <ControlTemplate TargetType="Button">
                                     <StackPanel Orientation="Horizontal" Background="Transparent">
-                                        <Ellipse Width="8" Height="8" Fill="{Binding TintPrimaryBrush}" Margin="0,0,6,0"/>
+                                        <Ellipse Width="8" Height="8" Fill="{Binding TintPrimary, Converter={StaticResource RgbToBrush}}" Margin="0,0,6,0"/>
                                         <TextBlock Text="{Binding CurrentTint.Name}"
                                                    FontSize="11" Foreground="{StaticResource SecondaryText}"/>
                                     </StackPanel>
@@ -241,7 +242,7 @@
                                         <DockPanel Margin="0,0,0,10">
                                             <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
                                                 <Ellipse Width="10" Height="10"
-                                                         Fill="{Binding AccentBrush}" Margin="0,0,8,0"/>
+                                                         Fill="{Binding Accent, Converter={StaticResource RgbToBrush}}" Margin="0,0,8,0"/>
                                                 <TextBlock Text="{Binding DisplayName}"
                                                            FontSize="15" FontWeight="SemiBold"
                                                            Foreground="{StaticResource PrimaryText}"/>
@@ -396,7 +397,7 @@
                                                                     <ProgressBar.Template>
                                                                         <ControlTemplate TargetType="ProgressBar">
                                                                             <Border Background="#20FFFFFF" CornerRadius="3" x:Name="PART_Track">
-                                                                                <Border Background="{Binding DataContext.AccentBrush, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CornerRadius="3" HorizontalAlignment="Left" x:Name="PART_Indicator" />
+                                                                                <Border Background="{Binding DataContext.Accent, Converter={StaticResource RgbToBrush}, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CornerRadius="3" HorizontalAlignment="Left" x:Name="PART_Indicator" />
                                                                             </Border>
                                                                         </ControlTemplate>
                                                                     </ProgressBar.Template>

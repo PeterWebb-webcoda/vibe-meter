@@ -1,4 +1,4 @@
-namespace VibeMeter.Models;
+namespace VibeMeter.Ui.Models;
 
 /// <summary>Visual style used for the usage gauge display.</summary>
 public enum MeterStyle

@@ -1,9 +1,9 @@
 using System;
 using System.IO;
-using VibeMeter.Models;
+using VibeMeter.Ui.Models;
 using VibeMeter.Publishing;
 
-namespace VibeMeter.Services;
+namespace VibeMeter.Ui.Services;
 
 /// <summary>
 /// Turns the tray app's own settings and paths into a

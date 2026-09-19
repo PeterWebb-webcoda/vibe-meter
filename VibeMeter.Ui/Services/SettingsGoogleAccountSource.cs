@@ -1,7 +1,7 @@
 using System.Collections.Generic;
 using VibeMeter.Providers.Google;
 
-namespace VibeMeter.Services;
+namespace VibeMeter.Ui.Services;
 
 /// <summary>
 /// The tray app's Google accounts, read from its settings file on every fetch.
