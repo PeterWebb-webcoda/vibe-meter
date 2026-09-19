@@ -22,7 +22,11 @@ internal static class Program
         // Before Avalonia, so a second launch costs nothing and touches no provider API.
         if (!TryTakeInstanceLock())
         {
-            Console.Error.WriteLine("Vibe Meter is already running.");
+            // Launching again is what someone does when they cannot find the window, so
+            // that is treated as "show it", not as an error. stderr alone would go nowhere
+            // from a .desktop launcher.
+            RequestShowFromRunningInstance();
+            Console.Error.WriteLine("Vibe Meter is already running; asked it to show its window.");
             return;
         }
 
@@ -65,6 +69,17 @@ internal static class Program
             // Failing open risks a second copy; failing closed would refuse to run at all.
             return true;
         }
+    }
+
+    /// <summary>The marker a second launch drops for the running instance to notice.</summary>
+    public static string ShowRequestPath => Path.Combine(
+        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+        "VibeMeter", "show-request");
+
+    private static void RequestShowFromRunningInstance()
+    {
+        try { File.WriteAllText(ShowRequestPath, DateTime.UtcNow.ToString("O")); }
+        catch { /* the running instance simply will not hear about it */ }
     }
 
     /// <summary>

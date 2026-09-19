@@ -23,9 +23,12 @@ namespace VibeMeter.Providers.Google;
 /// <para>
 /// <see cref="LegacyRefreshToken"/> is the migration seam: it is the
 /// <c>"RefreshToken"</c> property that pre-protection files hold in the clear.
-/// It is read on load and then written back as <see langword="null"/>, which
-/// omits the property altogether, so the plaintext leaves the file the first
-/// time an upgraded build opens it.
+/// It is read on load and, <em>where this host can protect the value</em>, written
+/// back as <see langword="null"/> — which omits the property altogether, so the
+/// plaintext leaves the file. Where it cannot be protected the legacy value is left
+/// exactly as found: destroying a credential the user still holds would be worse
+/// than leaving plaintext that was already in the file. See
+/// <see cref="GoogleAccountProtection.Unseal"/>.
 /// </para>
 /// </remarks>
 public sealed class GoogleAccount
@@ -49,9 +52,10 @@ public sealed class GoogleAccount
 
     /// <summary>
     /// The plaintext refresh token as written by builds before protection existed.
-    /// READ ONLY on load, by <see cref="GoogleAccountProtection.Unseal"/>, which
-    /// clears it — it is never written back, so it disappears from the file on the
-    /// first load after upgrading.
+    /// Read on load by <see cref="GoogleAccountProtection.Unseal"/>, which clears it —
+    /// so it disappears from the file on the first load after upgrading — but ONLY on a
+    /// host that could protect the value. Where none can, it is left in place and does
+    /// get written back, which is the deliberate lesser harm.
     /// </summary>
     [JsonPropertyName("RefreshToken")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

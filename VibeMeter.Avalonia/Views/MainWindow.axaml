@@ -94,7 +94,8 @@
             <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
                 <Button Classes="icon" Command="{Binding RefreshCommand}" ToolTip.Tip="Refresh">Refresh</Button>
                 <Button Classes="icon" Click="SettingsButton_Click" ToolTip.Tip="Settings">Settings</Button>
-                <Button Classes="icon" Click="HideButton_Click" ToolTip.Tip="Hide to tray">Hide</Button>
+                <Button x:Name="HideButton" Classes="icon" Click="HideButton_Click"
+                        ToolTip.Tip="Hide to tray">Hide</Button>
             </StackPanel>
         </Grid>
 

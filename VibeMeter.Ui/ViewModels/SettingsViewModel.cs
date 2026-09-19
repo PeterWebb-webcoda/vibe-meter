@@ -138,7 +138,16 @@ public partial class SettingsViewModel : ObservableObject
         _mainViewModel.AlwaysOnTop = AlwaysOnTop;
         _mainViewModel.SaveSettings();
 
-        var settings = _settingsService.Load();
+        // Same hazard as MainViewModel.PersistSettings: this read is written straight back,
+        // so a failed read must not be treated as "no settings yet". Refusing loses this
+        // one save; proceeding would overwrite the Google accounts this window does not own.
+        if (!_settingsService.TryLoad(out var settings))
+        {
+            PublishStatusText = "Settings were not saved: the settings file could not be read. " +
+                                "Nothing was changed. Try again.";
+            return;
+        }
+
         settings.LaunchAtStartup = LaunchAtStartup;
 
         settings.PublishEnabled = PublishEnabled;
@@ -199,9 +208,9 @@ public partial class SettingsViewModel : ObservableObject
     /// Registers or removes exactly one launcher in the per-user Startup folder.
     /// </summary>
     /// <remarks>
-    /// <para>The app has no single-instance guard, so leaving two launchers behind would put
-    /// two tray icons up at logon. A hand-made <c>VibeMeter.lnk</c> is therefore treated as
-    /// the launcher when one is present — it is the tidier of the two (a <c>.bat</c> flashes
+    /// <para>The WPF app has no single-instance guard — only the Avalonia host takes one —
+    /// so leaving two launchers behind would put two tray icons up at logon. A hand-made
+    /// <c>VibeMeter.lnk</c> is therefore treated as the launcher when one is present — it is the tidier of the two (a <c>.bat</c> flashes
     /// a console window at logon) — and no <c>.bat</c> is added alongside it.</para>
     /// <para>Disabling removes <em>both</em> forms, otherwise the toggle would appear to do
     /// nothing whenever a shortcut was the active launcher.</para>

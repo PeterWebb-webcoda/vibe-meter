@@ -62,32 +62,72 @@ public class SettingsService
     public string SettingsFilePath => _settingsFilePath;
 
     /// <summary>Returns defaults when the file is missing or unreadable.</summary>
-    public SettingsData Load()
+    /// <remarks>
+    /// Callers that are about to WRITE what they read must use <see cref="TryLoad"/>
+    /// instead. This overload cannot tell "there is nothing yet" from "it could not be
+    /// read", and overlaying a few fields onto defaults and saving that is how a whole
+    /// settings file gets replaced by one transient read failure.
+    /// </remarks>
+    public SettingsData Load() => TryLoad(out var data) ? data : new SettingsData();
+
+    /// <summary>
+    /// Reads the settings, reporting whether the read itself succeeded.
+    /// </summary>
+    /// <returns>
+    /// <see langword="true"/> when the file was read, or is simply not there yet — in both
+    /// cases <paramref name="data"/> is safe to build on. <see langword="false"/> when the
+    /// file exists but could not be read or parsed, in which case <paramref name="data"/> is
+    /// defaults that must NOT be written back over it.
+    /// </returns>
+    /// <remarks>
+    /// The distinction is the whole point. <see cref="Save"/> writes the file whole, and
+    /// <see cref="SettingsGoogleAccountSource"/> loads it from provider fetch threads, so a
+    /// sharing violation between the two is ordinary rather than exotic. Treating that
+    /// failure as "no settings yet" would discard every Google account and its protected
+    /// token, every provider toggle and the whole publish block.
+    /// </remarks>
+    public bool TryLoad(out SettingsData data)
     {
-        SettingsData data;
+        data = new SettingsData();
+
+        SettingsData read;
         try
         {
             if (!File.Exists(_settingsFilePath))
             {
-                return new SettingsData();
+                return true;
             }
 
             var json = File.ReadAllText(_settingsFilePath);
-            data = JsonSerializer.Deserialize<SettingsData>(json, JsonOptions) ?? new SettingsData();
+            read = JsonSerializer.Deserialize<SettingsData>(json, JsonOptions) ?? new SettingsData();
         }
         catch
         {
-            return new SettingsData();
+            // Deliberately not narrowed to IOException. A parse failure on a file that is
+            // present is equally a reason not to overwrite it: with an atomic Save a reader
+            // never sees a half-written file, so malformed content means something else
+            // wrote it, and that is not ours to discard.
+            return false;
         }
+
+        data = read;
 
         try
         {
-            // Opens each stored token for this session, and migrates any that a
-            // previous build left in the clear. The write-back is the migration:
-            // until it happens the plaintext is still in the file.
+            // Opens each stored token for this session, and migrates any that a previous
+            // build left in the clear. The write-back is the migration — but only where the
+            // plaintext could be replaced with a protected form; where it could not, Unseal
+            // reports no change and this file is deliberately left exactly as it was.
             if (GoogleAccountProtection.Unseal(data.GoogleAccounts, Protector))
             {
                 Save(data);
+            }
+            else
+            {
+                // A file that is not being rewritten still needs its mode narrowed: on a host
+                // with no protector that file is precisely the one that may hold a plaintext
+                // refresh token, and Save is the only other place this happens.
+                RestrictToOwner();
             }
         }
         catch
@@ -97,14 +137,29 @@ public class SettingsService
             // the only thing worth saying here would be about a credential.
         }
 
-        return data;
+        return true;
     }
 
+    /// <summary>
+    /// Writes the settings file whole, atomically.
+    /// </summary>
+    /// <remarks>
+    /// Via a temporary file in the same directory and then a rename, so a reader either sees
+    /// the previous file or the new one and never a partial write. A plain WriteAllText left
+    /// a window in which a concurrent load — which happens on every provider fetch — could
+    /// read a truncated file, and the caller that then saved what it had read would make the
+    /// damage permanent.
+    /// </remarks>
     public void Save(SettingsData data)
     {
         Directory.CreateDirectory(_settingsDirectory);
         var json = JsonSerializer.Serialize(data, JsonOptions);
-        File.WriteAllText(_settingsFilePath, json);
+
+        var temp = _settingsFilePath + ".tmp";
+        File.WriteAllText(temp, json);
+        RestrictToOwner(temp);
+        File.Move(temp, _settingsFilePath, overwrite: true);
+
         RestrictToOwner();
     }
 
@@ -119,13 +174,13 @@ public class SettingsService
     /// account on a shared machine. Windows is left alone: it inherits the profile's ACL.
     /// Failure is ignored deliberately; a settings write must not fail over a mode change.
     /// </remarks>
-    private void RestrictToOwner()
+    private void RestrictToOwner(string? path = null)
     {
         if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()) return;
 
         try
         {
-            File.SetUnixFileMode(_settingsFilePath,
+            File.SetUnixFileMode(path ?? _settingsFilePath,
                 UnixFileMode.UserRead | UnixFileMode.UserWrite);
             new DirectoryInfo(_settingsDirectory).UnixFileMode =
                 UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;

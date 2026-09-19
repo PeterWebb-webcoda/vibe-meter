@@ -8,7 +8,10 @@ namespace VibeMeter.Avalonia.Views;
 
 public partial class MainWindow : Window
 {
-    private readonly MainViewModel _viewModel;
+    // null! rather than nullable: every runtime path goes through the constructor below
+    // and sets it. Only the design-time constructor leaves it unset, and the previewer
+    // never reaches the members that use it.
+    private readonly MainViewModel _viewModel = null!;
 
     /// <summary>
     /// Design-time only. The XAML previewer instantiates a window through the runtime
@@ -106,6 +109,16 @@ public partial class MainWindow : Window
     public void ShowTrayUnavailableNotice()
     {
         CloseExitsApp = true;
+
+        // With no tray, every route that puts this window away has to be removed or it
+        // leads straight back to the unreachable state this whole fallback exists to
+        // prevent. "Hide to tray" would hide the only window into a tray that is not
+        // there, and the single-instance guard would then refuse the obvious recovery.
+        HideButton.IsVisible = false;
+
+        // And the window manager needs to be able to bring it back from minimised, which
+        // it cannot do for a window that is not in the taskbar.
+        ShowInTaskbar = true;
         TrayNoticeText.Text =
             "No system tray was found on this desktop, so Vibe Meter is showing this window " +
             "instead of a tray icon. GNOME needs the AppIndicator extension; Cinnamon, KDE " +

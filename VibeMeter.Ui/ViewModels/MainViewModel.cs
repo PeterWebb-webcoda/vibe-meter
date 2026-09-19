@@ -227,6 +227,19 @@ public partial class MainViewModel : ObservableObject
         _settingsService.Protector.TryProtect("vibemeter-protector-probe", out _);
 
     /// <summary>
+    /// Why an account cannot be added, worded from the failure rather than from a guess at
+    /// the platform. Protection can be unavailable because the host has no implementation at
+    /// all, or because the one it has declined — a roaming or temporary Windows profile. The
+    /// reader only needs to know that storing the token safely is not possible here.
+    /// </summary>
+    private static string ProtectionUnavailableMessage =>
+        "This machine cannot protect a stored secret, so the Google refresh token was not " +
+        "saved and the account was not added. Nothing already configured has changed. " +
+        "On Windows this usually means a roaming or temporary profile, and signing in on " +
+        "the machine's own account resolves it; on a platform with no secret store yet, " +
+        "adding an account is not available.";
+
+    /// <summary>
     /// Runs the interactive Google OAuth flow and, on success, persists the new account.
     /// Called from Settings → Add Google account. Returns the added email on success,
     /// null on failure/cancellation (the error is surfaced to the caller to display).
@@ -241,9 +254,10 @@ public partial class MainViewModel : ObservableObject
             // was always going to be discarded.
             if (!SecretProtectionAvailable)
             {
-                return ("", "This machine has no secret store VibeMeter can use, so a Google " +
-                            "refresh token cannot be saved safely and the account was not added. " +
-                            "Secret protection is currently implemented for Windows only.");
+                // Deliberately says nothing about which OS this is. The same path is reached
+                // on Windows whenever DPAPI itself fails - a roaming or temporary profile -
+                // so naming a platform here would be wrong for whoever it names.
+                return ("", ProtectionUnavailableMessage);
             }
 
             var (email, refreshToken) = await GoogleOAuthFlow.RunAsync();
@@ -302,7 +316,20 @@ public partial class MainViewModel : ObservableObject
     /// </remarks>
     private void PersistSettings(Action<SettingsData>? alsoApply = null)
     {
-        var settings = _settingsService.Load();
+        // A read that FAILED must never be written back. Load returns defaults for an
+        // unreadable file exactly as it does for an absent one, so overlaying these six
+        // properties onto that and saving would replace every Google account and its
+        // protected token, every provider toggle and the whole publish block with defaults
+        // — on one transient sharing violation against a file the provider threads also
+        // read. Skipping the write loses nothing but this one change.
+        if (!_settingsService.TryLoad(out var settings))
+        {
+            ErrorLog.Write("settings", "Settings",
+                "Settings were not saved: the settings file could not be read, and writing " +
+                "now would have replaced its contents with defaults. The change will be " +
+                "kept if the next save succeeds.");
+            return;
+        }
 
         settings.TintIndex = TintIndex;
         settings.AutoRefreshEnabled = AutoRefreshEnabled;

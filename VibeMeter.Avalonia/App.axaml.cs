@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using Avalonia;
 using Avalonia.Controls;
 using Avalonia.Controls.ApplicationLifetimes;
@@ -20,6 +21,9 @@ public class App : Application
 
     /// <summary>False when this desktop hosts no system tray, so the window stands in for it.</summary>
     private bool _trayAvailable = true;
+
+    /// <summary>Watches for a second launch asking this instance to show itself.</summary>
+    private FileSystemWatcher? _showRequestWatcher;
     private MainViewModel? _mainViewModel;
     private DispatcherTimer? _refreshTimer;
     private SettingsService? _settingsService;
@@ -89,6 +93,8 @@ public class App : Application
 
             // Opt-in publishing (no-op unless enabled in settings).
             RestartPublishing();
+
+            WatchForShowRequests();
 
             if (!_trayAvailable)
             {
@@ -168,6 +174,47 @@ public class App : Application
     }
 
     /// <summary>
+    /// Brings the window up when a second launch asks for it.
+    /// </summary>
+    /// <remarks>
+    /// Launching again is what someone does when they cannot find the window — most of all
+    /// on a desktop with no tray, where it is the obvious recovery. The single-instance
+    /// guard refuses that launch, so the refused process leaves a marker file and this turns
+    /// it into "show the window" rather than nothing at all.
+    /// </remarks>
+    private void WatchForShowRequests()
+    {
+        try
+        {
+            var path = Program.ShowRequestPath;
+            var dir = Path.GetDirectoryName(path);
+            if (string.IsNullOrEmpty(dir)) return;
+
+            Directory.CreateDirectory(dir);
+
+            _showRequestWatcher = new FileSystemWatcher(dir, Path.GetFileName(path))
+            {
+                NotifyFilter = NotifyFilters.LastWrite | NotifyFilters.FileName,
+                EnableRaisingEvents = true
+            };
+
+            void Handle(object? _, FileSystemEventArgs __) =>
+                Dispatcher.UIThread.Post(() =>
+                {
+                    try { File.Delete(path); } catch { /* it has served its purpose */ }
+                    ShowMainWindow();
+                });
+
+            _showRequestWatcher.Created += Handle;
+            _showRequestWatcher.Changed += Handle;
+        }
+        catch
+        {
+            // A missing watcher only costs the convenience; the app is unaffected.
+        }
+    }
+
+    /// <summary>
     /// Hides the main window, taking any open Settings window with it.
     /// </summary>
     /// <remarks>
@@ -177,11 +224,11 @@ public class App : Application
     /// </remarks>
     public void HideMainWindow()
     {
-        if (_settingsWindow is { } settings)
-        {
-            settings.Close();
-            _settingsWindow = null;
-        }
+        // Hidden, NOT closed. Settings is Save-and-Close only, so closing it here threw
+        // away whatever had been typed - a publish tenant or client id - with no prompt,
+        // just because the tray icon was clicked. Hiding keeps the instance and its edits,
+        // and ShowSettings reuses it, so the leak this replaced does not come back either.
+        _settingsWindow?.Hide();
 
         _mainWindow?.Hide();
     }
@@ -198,9 +245,14 @@ public class App : Application
 
     public void ShowSettings()
     {
-        if (_settingsWindow is { IsVisible: true })
+        // Reuse whatever instance exists, visible or merely hidden by HideMainWindow, so
+        // unsaved edits survive a trip to the tray and back.
+        if (_settingsWindow is { } existing)
         {
-            _settingsWindow.Activate();
+            existing.Show();
+            if (existing.WindowState == WindowState.Minimized)
+                existing.WindowState = WindowState.Normal;
+            existing.Activate();
             return;
         }
 
@@ -215,6 +267,10 @@ public class App : Application
             // as the Settings menu item having done nothing at all.
             Topmost = _mainWindow?.Topmost ?? false
         };
+
+        // Once actually closed (the X, or Save & Close) the instance cannot be shown again,
+        // so the field has to be cleared or the reuse path above would resurrect a dead window.
+        _settingsWindow.Closed += (_, _) => _settingsWindow = null;
 
         // Owning it to the main window keeps it above that window specifically, and
         // lets the two minimise and restore together. The owner has to be on screen
@@ -257,6 +313,7 @@ public class App : Application
     private void Quit()
     {
         IsQuitting = true;
+        _showRequestWatcher?.Dispose();
         _publishHost?.Dispose();
         _trayIcon?.Dispose();
         if (ApplicationLifetime is IClassicDesktopStyleApplicationLifetime lifetime)

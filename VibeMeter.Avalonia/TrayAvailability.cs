@@ -33,8 +33,15 @@ internal static class TrayAvailability
 {
     private const string WatcherName = "org.kde.StatusNotifierWatcher";
 
-    /// <summary>How long to wait for the bus before assuming there is no tray.</summary>
-    private static readonly TimeSpan Timeout = TimeSpan.FromSeconds(3);
+    /// <summary>
+    /// How long to wait for the bus before assuming there is no tray.
+    /// </summary>
+    /// <remarks>
+    /// This is spent on the UI thread before any window exists, so it is time with nothing
+    /// on screen. Kept short deliberately: a session bus that is going to answer answers in
+    /// milliseconds, and one that has not answered in this long is not going to.
+    /// </remarks>
+    private static readonly TimeSpan Timeout = TimeSpan.FromMilliseconds(1500);
 
     public static bool TrayCanBeShown()
     {
@@ -43,6 +50,12 @@ internal static class TrayAvailability
 
         try
         {
+            // Task.Run plus a bounded Wait, NOT an inline await: this is called during
+            // framework startup where there is nothing to await from. The ConfigureAwait
+            // (false) calls inside HasWatcherAsync are load-bearing because of that Wait -
+            // without them the continuation would be posted back to a thread that is
+            // blocked here, and the probe would deadlock until the timeout. Do not "tidy"
+            // them away.
             var probe = Task.Run(HasWatcherAsync);
             return probe.Wait(Timeout) && probe.Result;
         }

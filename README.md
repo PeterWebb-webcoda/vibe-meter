@@ -50,8 +50,10 @@ so, rather than running with no icon and no way to reach it.
 - Settings are applied on **Save & Close** only — changing a control has no live effect.
 - The meter-style setting persists but has no visual effect; gauges always render as bars.
   The Circular and Battery styles are Windows-only so far.
-- **"Launch at Login" does nothing on Linux.** It is disabled rather than implemented — an
-  XDG autostart entry is not written yet.
+- **"Launch at Login" does nothing on Linux.** The checkbox is live and its value is saved,
+  but no autostart entry is written — an XDG `.desktop` entry is not implemented yet. It no
+  longer writes a stray Windows batch file into the working directory, which is what it did
+  before.
 - **Google accounts cannot be added on Linux.** Secret protection is implemented for Windows
   only (DPAPI), and a refresh token will not be stored unprotected, so the flow declines
   before opening a browser instead of failing after you have granted consent.
@@ -72,10 +74,14 @@ VibeMeter is local-first:
   usage cache or the desktop app's usage history) — no token, no network.
 
 Settings are stored in `%APPDATA%\VibeMeter\settings.json` on Windows and
-`~/.config/VibeMeter/settings.json` on Linux. No secret is kept there — a Google refresh
-token is stored only in protected form — but it does hold your Google account email list and,
-if you enable publishing, the tenant and client ids. On Linux the file and its directory are
+`~/.config/VibeMeter/settings.json` on Linux. It holds your Google account email list and, if
+you enable publishing, the tenant and client ids. On Linux the file and its directory are
 restricted to your user.
+
+A Google refresh token is written only in protected form, with one documented exception: a
+file carried over from a pre-protection build, opened on a host with no secret store, keeps
+the plaintext token it already contained. VibeMeter will not destroy it and will not rewrite
+that file — see the Linux beta notes above.
 
 **On Linux, opt-in publishing caches its sign-in token unencrypted.** The Microsoft identity
 library's encrypted Linux store needs libsecret and a keyring, which a headless or minimal
