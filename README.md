@@ -1,6 +1,6 @@
 # Vibe Meter
 
-A Windows system-tray widget that monitors **AI usage and rate limits across multiple
+A system-tray widget that monitors **AI usage and rate limits across multiple
 providers** — Codex (OpenAI) and Claude Code today, with Z.ai GLM detection — from a
 single, always-on-top meter.
 
@@ -28,6 +28,29 @@ Requirements: **Windows 10/11 x64**. The build is self-contained — no .NET run
 install required. Sign in to [Codex](https://github.com/openai/codex) and/or
 [Claude Code](https://claude.com/claude-code) on the PC, and/or set the
 `ZAI_API_KEY` environment variable, for usage data to appear.
+
+### Linux (beta)
+
+A native Linux tray app built on [Avalonia](https://avaloniaui.net/) lives in
+`VibeMeter.Avalonia`. There is no release artifact yet — build it from source:
+
+```bash
+dotnet run --project VibeMeter.Avalonia/VibeMeter.Avalonia.csproj -c Release
+```
+
+It starts minimised to the system tray. Requires a desktop that hosts a
+StatusNotifierItem tray: **Cinnamon, KDE and XFCE work**; GNOME needs the
+AppIndicator extension.
+
+**Known limitations in this beta:**
+
+- Settings are applied on **Save & Close** only — changing a control has no live effect.
+- The meter-style setting persists but has no visual effect; gauges always render as bars.
+  The Circular and Battery styles are Windows-only so far.
+- "Launch at Login" does nothing on Linux — it still writes a Windows-style startup file
+  instead of an XDG autostart entry.
+- Google accounts sealed with DPAPI on Windows cannot be read on Linux; those settings
+  fall back rather than failing.
 
 ## Privacy
 

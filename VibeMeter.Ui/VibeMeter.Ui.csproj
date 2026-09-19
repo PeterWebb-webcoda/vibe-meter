@@ -25,6 +25,7 @@
          SAME glue (rather than forking the queue/token-cache paths) for its
          identical tray+publish role on Linux. -->
     <InternalsVisibleTo Include="VibeMeter" />
+    <InternalsVisibleTo Include="VibeMeter.Avalonia" />
   </ItemGroup>
 
 </Project>

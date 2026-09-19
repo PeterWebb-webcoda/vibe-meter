@@ -1,0 +1,300 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="clr-namespace:VibeMeter.Ui.ViewModels;assembly=VibeMeter.Ui"
+        xmlns:models="clr-namespace:VibeMeter.Ui.Models;assembly=VibeMeter.Ui"
+        xmlns:conv="clr-namespace:VibeMeter.Avalonia.Converters"
+        x:Class="VibeMeter.Avalonia.Views.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Title="Vibe Meter"
+        Width="440" Height="680"
+        MinWidth="300" MinHeight="360"
+        ShowInTaskbar="False"
+        Topmost="{Binding AlwaysOnTop}"
+        Background="#252540">
+
+    <!-- Linux equivalent of the WPF MainWindow: same information (provider
+         cards, gauges as horizontal bars, badges, notices, cost breakdown),
+         Fluent dark theme. -->
+
+    <Window.Resources>
+        <conv:RgbToBrushConverter x:Key="RgbToBrush" />
+        <conv:TintIndexToBrushConverter x:Key="TintIndexToBrush" />
+        <conv:TintIndexToNameConverter x:Key="TintIndexToName" />
+        <conv:NonEmptyToBoolConverter x:Key="NonEmpty" />
+    </Window.Resources>
+
+    <Window.Styles>
+        <Style Selector="Border.card">
+            <Setter Property="Background" Value="#18FFFFFF" />
+            <Setter Property="CornerRadius" Value="12" />
+            <Setter Property="Padding" Value="14" />
+            <Setter Property="Margin" Value="0,0,0,12" />
+        </Style>
+
+        <Style Selector="Border.badge">
+            <Setter Property="Background" Value="#20FFFFFF" />
+            <Setter Property="CornerRadius" Value="10" />
+            <Setter Property="Padding" Value="8,2" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+
+        <Style Selector="Button.icon">
+            <Setter Property="Background" Value="#30FFFFFF" />
+            <Setter Property="Foreground" Value="White" />
+            <Setter Property="BorderThickness" Value="0" />
+            <Setter Property="CornerRadius" Value="8" />
+            <Setter Property="Padding" Value="10,4" />
+            <Setter Property="VerticalAlignment" Value="Center" />
+        </Style>
+        <Style Selector="Button.icon:pointerover">
+            <Setter Property="Background" Value="#50FFFFFF" />
+        </Style>
+        <Style Selector="Button.icon:pressed">
+            <Setter Property="Background" Value="#20FFFFFF" />
+        </Style>
+
+        <Style Selector="ProgressBar.gauge">
+            <Setter Property="Height" Value="6" />
+            <Setter Property="MinHeight" Value="6" />
+            <Setter Property="Padding" Value="0" />
+            <Setter Property="CornerRadius" Value="3" />
+            <Setter Property="Background" Value="#20FFFFFF" />
+        </Style>
+    </Window.Styles>
+
+    <DockPanel Margin="16">
+
+        <!-- Footer: version -->
+        <TextBlock DockPanel.Dock="Bottom" Text="{Binding VersionText}"
+                   FontSize="9" Foreground="#B0B0C0"
+                   HorizontalAlignment="Center" Margin="0,8,0,0" Opacity="0.6" />
+
+        <!-- Header -->
+        <Grid DockPanel.Dock="Top" Margin="0,0,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <StackPanel>
+                <TextBlock Text="Vibe Meter" FontSize="20" FontWeight="SemiBold" Foreground="White" />
+                <TextBlock Text="AI usage across Codex, Claude, Z.ai &amp; Google"
+                           FontSize="11" Foreground="#B0B0C0" />
+            </StackPanel>
+
+            <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                <Button Classes="icon" Command="{Binding RefreshCommand}" ToolTip.Tip="Refresh">Refresh</Button>
+                <Button Classes="icon" Click="SettingsButton_Click" ToolTip.Tip="Settings">Settings</Button>
+                <Button Classes="icon" Click="HideButton_Click" ToolTip.Tip="Hide to tray">Hide</Button>
+            </StackPanel>
+        </Grid>
+
+        <!-- Footer: tint + status -->
+        <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" Spacing="0"
+                    HorizontalAlignment="Center" Margin="0,12,0,0">
+            <Button Command="{Binding CycleTintCommand}" Background="Transparent"
+                    BorderThickness="0" Padding="4,2" Cursor="Hand"
+                    ToolTip.Tip="Cycle tint">
+                <StackPanel Orientation="Horizontal" Spacing="6">
+                    <Ellipse Width="8" Height="8"
+                             Fill="{Binding TintIndex, Converter={StaticResource TintIndexToBrush}}" />
+                    <TextBlock Text="{Binding TintIndex, Converter={StaticResource TintIndexToName}}"
+                               FontSize="11" Foreground="#B0B0C0" />
+                </StackPanel>
+            </Button>
+            <TextBlock Text="  ·  " FontSize="11" Foreground="#B0B0C0" VerticalAlignment="Center" />
+            <TextBlock Text="{Binding StatusMessage}" FontSize="11" Foreground="#B0B0C0" VerticalAlignment="Center" />
+        </StackPanel>
+
+        <!-- Provider cards -->
+        <ScrollViewer>
+            <ItemsControl ItemsSource="{Binding Providers}">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:ProviderViewModel">
+                        <Border Classes="card">
+                            <StackPanel>
+
+                                <!-- Card header -->
+                                <Grid Margin="0,0,0,10">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                        <Ellipse Width="10" Height="10"
+                                                 Fill="{Binding Accent, Converter={StaticResource RgbToBrush}}" />
+                                        <TextBlock Text="{Binding DisplayName}" FontSize="15"
+                                                   FontWeight="SemiBold" Foreground="White" />
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8"
+                                                VerticalAlignment="Center">
+                                        <!-- Plan badge -->
+                                        <Border Classes="badge"
+                                                IsVisible="{Binding PlanLabel, Converter={StaticResource NonEmpty}}">
+                                            <TextBlock Text="{Binding PlanLabel}" FontSize="10" Foreground="White" />
+                                        </Border>
+
+                                        <!-- Available-credits badge -->
+                                        <Border Classes="badge" Background="#3040C873"
+                                                IsVisible="{Binding ShowResetBank}"
+                                                ToolTip.Tip="{Binding ResetCreditsTooltip}">
+                                            <StackPanel Orientation="Horizontal">
+                                                <TextBlock Text="{Binding AvailableCount}" FontSize="10"
+                                                           Foreground="#40C873" FontWeight="SemiBold" />
+                                                <TextBlock Text=" available" FontSize="10" Foreground="#40C873" />
+                                            </StackPanel>
+                                        </Border>
+
+                                        <!-- Account carousel (Google multi-account): ‹ 1/2 › -->
+                                        <StackPanel Orientation="Horizontal" Spacing="4" VerticalAlignment="Center"
+                                                    IsVisible="{Binding ShowAccountSwitcher}">
+                                            <Button Classes="icon" Padding="7,1" FontSize="12" Content="&#x2039;"
+                                                    Click="PrevAccountButton_Click"
+                                                    ToolTip.Tip="Previous Google account" />
+                                            <TextBlock Text="{Binding AccountPositionText}" FontSize="10"
+                                                       Foreground="#B0B0C0" VerticalAlignment="Center" />
+                                            <Button Classes="icon" Padding="7,1" FontSize="12" Content="&#x203A;"
+                                                    Click="NextAccountButton_Click"
+                                                    ToolTip.Tip="Next Google account" />
+                                        </StackPanel>
+
+                                        <!-- Cost breakdown toggle -->
+                                        <ToggleButton IsVisible="{Binding ShowDetailsButton}"
+                                                      IsChecked="{Binding IsCostDetailsExpanded, Mode=TwoWay}"
+                                                      Background="Transparent" BorderBrush="#38FFFFFF"
+                                                      BorderThickness="1" Foreground="White"
+                                                      Padding="8,2" FontSize="10" Cursor="Hand"
+                                                      Content="Cost breakdown" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <!-- Gauges: horizontal bars -->
+                                <ItemsControl ItemsSource="{Binding Gauges}">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate x:DataType="models:UsageGaugeData">
+                                            <StackPanel Margin="0,4,0,8" ToolTip.Tip="{Binding TooltipText}">
+                                                <Grid Margin="0,0,0,4">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+
+                                                    <TextBlock Text="{Binding Title}" FontSize="12"
+                                                               FontWeight="SemiBold" Foreground="White"
+                                                               VerticalAlignment="Center" />
+                                                    <TextBlock Text="{Binding Subtitle}" FontSize="10"
+                                                               Foreground="#B0B0C0" Margin="6,0,0,0"
+                                                               VerticalAlignment="Center" Grid.Column="1" />
+                                                    <StackPanel Grid.Column="2" Orientation="Horizontal"
+                                                                VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding ClampedPercent}" FontSize="13"
+                                                                   FontWeight="Bold" Foreground="White" />
+                                                        <TextBlock Text="%" FontSize="9" Foreground="#B0B0C0"
+                                                                   Margin="1,2,0,0" />
+                                                    </StackPanel>
+                                                </Grid>
+
+                                                <ProgressBar Classes="gauge" Minimum="0" Maximum="100"
+                                                             Value="{Binding ClampedPercent, Mode=OneWay}"
+                                                             Foreground="{Binding StatusColor, Converter={StaticResource RgbToBrush}}" />
+
+                                                <TextBlock Text="{Binding ResetText}" FontSize="9"
+                                                           Foreground="#808090" Margin="0,4,0,0"
+                                                           HorizontalAlignment="Right" />
+                                            </StackPanel>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+
+                                <!-- Cost panel -->
+                                <Border Background="#10FFFFFF" CornerRadius="8" Padding="12" Margin="0,12,0,0"
+                                        IsVisible="{Binding IsCostDetailsExpanded}">
+                                    <StackPanel>
+                                        <StackPanel Orientation="Horizontal" Spacing="8"
+                                                    HorizontalAlignment="Center">
+                                            <TextBlock Text="$" FontSize="18" VerticalAlignment="Center" />
+                                            <StackPanel>
+                                                <TextBlock Text="{Binding TodayCostText}" FontSize="16"
+                                                           FontWeight="SemiBold" Foreground="White" />
+                                                <StackPanel Orientation="Horizontal">
+                                                    <TextBlock Text="{Binding WeekCostText}" FontSize="11"
+                                                               Foreground="#B0B0C0" />
+                                                    <TextBlock Text=" • " FontSize="11" Foreground="#B0B0C0" />
+                                                    <TextBlock Text="{Binding WeekTokensText}" FontSize="11"
+                                                               Foreground="#B0B0C0" />
+                                                </StackPanel>
+                                            </StackPanel>
+                                        </StackPanel>
+
+                                        <ItemsControl ItemsSource="{Binding CostModelBreakdowns}" Margin="0,16,0,0">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate x:DataType="vm:CostModelBreakdownItem">
+                                                    <Grid Margin="0,0,0,6" ColumnDefinitions="Auto,*,Auto">
+                                                        <TextBlock Text="{Binding ModelName}" FontSize="11"
+                                                                   Foreground="#B0B0C0" Margin="0,0,8,0"
+                                                                   VerticalAlignment="Center" />
+                                                        <ProgressBar Classes="gauge" Grid.Column="1" Margin="0,0,8,0"
+                                                                     Minimum="0" Maximum="100"
+                                                                     Value="{Binding Percentage100, Mode=OneWay}"
+                                                                     Foreground="{Binding $parent[ItemsControl].((vm:ProviderViewModel)DataContext).Accent, Converter={StaticResource RgbToBrush}}" />
+                                                        <TextBlock Text="{Binding CostText}" FontSize="11"
+                                                                   Foreground="White" FontWeight="SemiBold"
+                                                                   VerticalAlignment="Center" Grid.Column="2" />
+                                                    </Grid>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                    </StackPanel>
+                                </Border>
+
+                                <!-- Reset note -->
+                                <TextBlock Text="{Binding ResetNote}" FontSize="11" Foreground="#B0B0C0"
+                                           HorizontalAlignment="Center" Margin="0,8,0,0"
+                                           IsVisible="{Binding ResetNote, Converter={StaticResource NonEmpty}}" />
+
+                                <!-- Neutral notice -->
+                                <Border Background="#20FFFFFF" CornerRadius="8" Padding="10" Margin="0,8,0,0"
+                                        IsVisible="{Binding ShowNotice}">
+                                    <TextBlock Text="{Binding Notice}" FontSize="11" Foreground="#B0B0C0"
+                                               TextWrapping="Wrap" />
+                                </Border>
+
+                                <!-- Not configured -->
+                                <Border Background="#20FFFFFF" CornerRadius="8" Padding="10" Margin="0,8,0,0"
+                                        IsVisible="{Binding ShowNotConfigured}">
+                                    <TextBlock Text="{Binding ErrorMessage}" FontSize="11" Foreground="#B0B0C0"
+                                               TextWrapping="Wrap" />
+                                </Border>
+
+                                <!-- Error -->
+                                <Border Background="#30482020" CornerRadius="8" Padding="10" Margin="0,8,0,0"
+                                        IsVisible="{Binding ShowError}">
+                                    <DockPanel>
+                                        <Button DockPanel.Dock="Right" VerticalAlignment="Top"
+                                                Click="CopyErrorButton_Click"
+                                                ToolTip.Tip="Copy error message"
+                                                Background="Transparent" BorderBrush="#40F04840"
+                                                BorderThickness="1" Foreground="#F04840"
+                                                Padding="6,1" Margin="8,0,0,0" Cursor="Hand"
+                                                Content="Copy" FontSize="10" />
+                                        <TextBlock Text="{Binding ErrorMessage}" FontSize="11"
+                                                   Foreground="#F04840" TextWrapping="Wrap" />
+                                    </DockPanel>
+                                </Border>
+
+                                <!-- Status line -->
+                                <TextBlock Text="{Binding StatusText}" FontSize="10" Foreground="#B0B0C0"
+                                           HorizontalAlignment="Right" Margin="0,6,0,0" />
+
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+
+    </DockPanel>
+</Window>

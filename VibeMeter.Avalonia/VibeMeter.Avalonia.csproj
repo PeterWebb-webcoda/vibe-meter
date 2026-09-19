@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>VibeMeter.Avalonia</RootNamespace>
+    <AssemblyName>VibeMeter.Avalonia</AssemblyName>
+    <Version>0.5.3</Version>
+    <Company>WebCoda</Company>
+    <Product>VibeMeter</Product>
+    <BuiltInComInteropSupport>true</BuiltInComInteropSupport>
+    <AvaloniaUseCompiledBindingsByDefault>true</AvaloniaUseCompiledBindingsByDefault>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Avalonia" Version="11.3.2" />
+    <PackageReference Include="Avalonia.Desktop" Version="11.3.2" />
+    <PackageReference Include="Avalonia.Themes.Fluent" Version="11.3.2" />
+    <PackageReference Include="Avalonia.Fonts.Inter" Version="11.3.2" />
+    <PackageReference Include="Tmds.DBus.Protocol" Version="0.21.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\VibeMeter.Core\VibeMeter.Core.csproj" />
+    <ProjectReference Include="..\VibeMeter.Publishing\VibeMeter.Publishing.csproj" />
+    <ProjectReference Include="..\VibeMeter.Ui\VibeMeter.Ui.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <AvaloniaResource Include="Assets\icon.png" />
+  </ItemGroup>
+
+</Project>

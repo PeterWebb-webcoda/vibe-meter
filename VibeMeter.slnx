@@ -1,5 +1,6 @@
 <Solution>
   <Project Path="VibeMeter.Agent/VibeMeter.Agent.csproj" />
+  <Project Path="VibeMeter.Avalonia/VibeMeter.Avalonia.csproj" />
   <Project Path="VibeMeter.Core/VibeMeter.Core.csproj" />
   <Project Path="VibeMeter.Publishing/VibeMeter.Publishing.csproj" />
   <Project Path="VibeMeter.Ui/VibeMeter.Ui.csproj" />
