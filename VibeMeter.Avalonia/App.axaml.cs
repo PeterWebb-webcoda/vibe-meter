@@ -165,9 +165,20 @@ public class App : Application
         var settingsViewModel = new SettingsViewModel(_mainViewModel, _settingsService, RestartPublishing);
         _settingsWindow = new SettingsWindow(settingsViewModel, _mainViewModel)
         {
-            Icon = AppIcon
+            Icon = AppIcon,
+            // The main window is pinned above everything while AlwaysOnTop is set.
+            // A settings window that does not match it opens underneath, which reads
+            // as the Settings menu item having done nothing at all.
+            Topmost = _mainWindow?.Topmost ?? false
         };
-        _settingsWindow.Show();
+
+        // Owning it to the main window keeps it above that window specifically, and
+        // lets the two minimise and restore together. The owner has to be on screen
+        // for that, and it is not when Settings is opened straight from the tray.
+        if (_mainWindow is { IsVisible: true })
+            _settingsWindow.Show(_mainWindow);
+        else
+            _settingsWindow.Show();
     }
 
     // --- Publishing (mirrors the WPF App's RestartPublishing / ShowSignInPrompt) ---
