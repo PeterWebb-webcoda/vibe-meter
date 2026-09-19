@@ -42,15 +42,24 @@ It starts minimised to the system tray. Requires a desktop that hosts a
 StatusNotifierItem tray: **Cinnamon, KDE and XFCE work**; GNOME needs the
 AppIndicator extension.
 
+If no StatusNotifierItem tray is available, the app shows its window at startup and says
+so, rather than running with no icon and no way to reach it.
+
 **Known limitations in this beta:**
 
 - Settings are applied on **Save & Close** only — changing a control has no live effect.
 - The meter-style setting persists but has no visual effect; gauges always render as bars.
   The Circular and Battery styles are Windows-only so far.
-- "Launch at Login" does nothing on Linux — it still writes a Windows-style startup file
-  instead of an XDG autostart entry.
-- Google accounts sealed with DPAPI on Windows cannot be read on Linux; those settings
-  fall back rather than failing.
+- **"Launch at Login" does nothing on Linux.** It is disabled rather than implemented — an
+  XDG autostart entry is not written yet.
+- **Google accounts cannot be added on Linux.** Secret protection is implemented for Windows
+  only (DPAPI), and a refresh token will not be stored unprotected, so the flow declines
+  before opening a browser instead of failing after you have granted consent.
+- **A `settings.json` carried over from Windows keeps working, but is not migrated.** An
+  account whose token is still in the clear from a pre-protection build is used as found and
+  left exactly as found. Nothing is destroyed, but the plaintext stays in that file until it
+  is opened on a host that can protect it. An account already sealed with DPAPI on Windows
+  cannot be opened here and is skipped.
 
 ## Privacy
 
@@ -62,7 +71,17 @@ VibeMeter is local-first:
 - Claude usage is read entirely from the local files Claude already maintains (the CLI's
   usage cache or the desktop app's usage history) — no token, no network.
 
-Settings are stored in `%APPDATA%\VibeMeter\settings.json`.
+Settings are stored in `%APPDATA%\VibeMeter\settings.json` on Windows and
+`~/.config/VibeMeter/settings.json` on Linux. No secret is kept there — a Google refresh
+token is stored only in protected form — but it does hold your Google account email list and,
+if you enable publishing, the tenant and client ids. On Linux the file and its directory are
+restricted to your user.
+
+**On Linux, opt-in publishing caches its sign-in token unencrypted.** The Microsoft identity
+library's encrypted Linux store needs libsecret and a keyring, which a headless or minimal
+desktop may not have, so the cache is written as a plain file readable by your user account
+(`~/.config/VibeMeter/`). It is a credential: treat it as one. Publishing is off by default,
+and nothing is cached unless you turn it on and sign in.
 
 ## Build from source
 

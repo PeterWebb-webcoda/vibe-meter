@@ -24,6 +24,7 @@
     <ProjectReference Include="..\VibeMeter.Agent\VibeMeter.Agent.csproj" />
     <ProjectReference Include="..\VibeMeter.Core\VibeMeter.Core.csproj" />
     <ProjectReference Include="..\VibeMeter.Publishing\VibeMeter.Publishing.csproj" />
+    <ProjectReference Include="..\VibeMeter.Ui\VibeMeter.Ui.csproj" />
   </ItemGroup>
 
 </Project>

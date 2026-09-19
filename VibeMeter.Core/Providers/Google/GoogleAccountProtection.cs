@@ -46,26 +46,38 @@ public static class GoogleAccountProtection
 
             account.NeedsReauthentication = false;
 
-            // A pre-protection file. Take the token out of the persisted shape
-            // FIRST, so every path below this point writes the file without it.
+            // A pre-protection file: the token is still in the clear on disk.
             if (!string.IsNullOrWhiteSpace(account.LegacyRefreshToken))
             {
                 string plaintext = account.LegacyRefreshToken!;
-                account.LegacyRefreshToken = null;
-                changed = true;
 
                 if (protector.TryProtect(plaintext, out var protectedValue))
                 {
+                    // Migration. The plaintext leaves the persisted shape only now
+                    // that there is a protected form to replace it with, and
+                    // changed=true makes the caller write that replacement out.
+                    account.LegacyRefreshToken = null;
                     account.ProtectedRefreshToken = protectedValue;
                     account.RefreshToken = plaintext;
+                    changed = true;
                 }
                 else
                 {
-                    // Cannot protect it here, and it is not going back in the
-                    // clear. The user re-adds the account.
-                    account.ProtectedRefreshToken = null;
-                    account.RefreshToken = "";
-                    account.NeedsReauthentication = true;
+                    // No protection available on this host — every non-Windows one,
+                    // since DPAPI is the only implementation. Clearing the legacy
+                    // value here would destroy a credential the person still has,
+                    // on nothing worse than opening the app, and re-adding the
+                    // account cannot succeed here either. So the stored shape is
+                    // left exactly as found and changed stays false, which stops
+                    // the caller rewriting the file at all.
+                    //
+                    // The plaintext therefore stays in a file that already held it.
+                    // That is not good, but it is not NEW harm, and it is the
+                    // lesser of the two: destroying the token would be.
+                    // RefreshToken is [JsonIgnore], so putting the value there
+                    // keeps the account working for this session without adding
+                    // the secret to anything on disk.
+                    account.RefreshToken = plaintext;
                 }
 
                 continue;

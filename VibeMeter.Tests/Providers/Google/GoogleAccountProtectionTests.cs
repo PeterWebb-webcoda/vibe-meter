@@ -26,7 +26,7 @@ public sealed class GoogleAccountProtectionTests
 
     // --- The protector itself ---
 
-    [Fact]
+    [WindowsOnlyFact]
     public void Dpapi_round_trips_a_secret_and_does_not_store_it_readably()
     {
         var protector = DpapiSecretProtector.Instance;
@@ -46,7 +46,7 @@ public sealed class GoogleAccountProtectionTests
         Assert.Equal("", opened);
     }
 
-    [Fact]
+    [WindowsOnlyFact]
     public void An_account_sealed_with_dpapi_opens_again_and_the_file_never_holds_the_token()
     {
         var account = new GoogleAccount { Email = "someone@example.com" };
@@ -135,18 +135,34 @@ public sealed class GoogleAccountProtectionTests
     }
 
     [Fact]
-    public void A_failed_protect_during_migration_drops_the_token_rather_than_storing_it_readably()
+    public void A_failed_protect_during_migration_keeps_the_token_rather_than_destroying_it()
     {
         var accounts = DeserialiseLegacyFile();
 
         bool changed = GoogleAccountProtection.Unseal(accounts, new UnavailableProtector());
 
-        Assert.True(changed);
+        // This reverses what this test asserted before. The old behaviour — clear the
+        // legacy value, report changed, let the caller write the stripped file — is
+        // right on Windows, where a failed protect means a broken profile and the user
+        // can re-add the account. It is wrong on a host that has no protector at all:
+        // there, merely opening the app destroyed a working credential, and re-adding
+        // it could not succeed either. changed=false is the part that matters, because
+        // it is what stops SettingsService rewriting the file.
+        Assert.False(changed);
+
         var account = Assert.Single(accounts);
-        Assert.True(account.NeedsReauthentication);
-        Assert.Equal("", account.RefreshToken);
         Assert.Null(account.ProtectedRefreshToken);
-        Assert.DoesNotContain(SyntheticToken, JsonSerializer.Serialize(accounts, Json));
+        Assert.False(account.NeedsReauthentication);
+
+        // Usable for this session, so the account keeps working...
+        Assert.Equal(SyntheticToken, account.RefreshToken);
+
+        // ...and the persisted shape is exactly as it was found. The plaintext is still
+        // there. That is the accepted cost: it was already in the file the user chose to
+        // open, so leaving it is not new harm, while destroying the token would be. The
+        // real fix is a protector for the platform, not a better way to lose the token.
+        Assert.Equal(SyntheticToken, account.LegacyRefreshToken);
+        Assert.Contains(SyntheticToken, JsonSerializer.Serialize(accounts, Json));
     }
 
     [Fact]

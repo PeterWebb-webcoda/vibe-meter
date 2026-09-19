@@ -208,6 +208,14 @@ public partial class SettingsViewModel : ObservableObject
     /// </remarks>
     private void UpdateStartupShortcut()
     {
+        // Windows only, and guarded rather than left to fail. SpecialFolder.Startup returns
+        // "" on Unix, so Path.Combine produced a RELATIVE "VibeMeter.bat": ticking the box
+        // wrote a Windows batch file into whatever directory the app happened to be launched
+        // from, and unticking called File.Delete("VibeMeter.bat") against that same directory,
+        // which would remove an unrelated file of that name. The catch below hid all of it.
+        // Launching at login on Linux needs an XDG autostart entry, which is not written yet.
+        if (!OperatingSystem.IsWindows()) return;
+
         try
         {
             string startupFolder = Environment.GetFolderPath(Environment.SpecialFolder.Startup);

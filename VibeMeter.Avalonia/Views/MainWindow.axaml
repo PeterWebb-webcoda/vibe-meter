@@ -64,6 +64,15 @@
 
     <DockPanel Margin="16">
 
+        <!-- Shown only when this desktop has no system tray. Without it the window would
+             not be here at all and the process would have no reachable UI. -->
+        <Border x:Name="TrayNotice" DockPanel.Dock="Top" IsVisible="False"
+                Background="#3A2F1A" BorderBrush="#8A6D3B" BorderThickness="1"
+                CornerRadius="6" Padding="10" Margin="0,0,0,12">
+            <TextBlock x:Name="TrayNoticeText" TextWrapping="Wrap"
+                       Foreground="#F0D9A0" FontSize="12" />
+        </Border>
+
         <!-- Footer: version -->
         <TextBlock DockPanel.Dock="Bottom" Text="{Binding VersionText}"
                    FontSize="9" Foreground="#B0B0C0"

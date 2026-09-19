@@ -184,8 +184,7 @@ public partial class MainViewModel : ObservableObject
     public void CycleTint()
     {
         TintIndex = (TintIndex + 1) % WidgetTint.All.Count;
-        _settings.TintIndex = TintIndex;
-        _settingsService.Save(_settings);
+        PersistSettings();
 
         OnPropertyChanged(nameof(CurrentTint));
         OnPropertyChanged(nameof(TintPrimary));
@@ -197,8 +196,7 @@ public partial class MainViewModel : ObservableObject
     public void ToggleCompact()
     {
         CompactMode = !CompactMode;
-        _settings.CompactMode = CompactMode;
-        _settingsService.Save(_settings);
+        PersistSettings();
     }
 
     /// <summary>
@@ -216,6 +214,19 @@ public partial class MainViewModel : ObservableObject
     public void CycleGoogleAccountBack() => GoogleProvider.CyclePrevAccount();
 
     /// <summary>
+    /// Whether this machine can protect a secret well enough to store one, tested by
+    /// asking the configured protector to protect a throwaway value.
+    /// </summary>
+    /// <remarks>
+    /// Probing rather than checking the operating system keeps this true of whatever
+    /// protector is configured, including a future non-Windows one — and a host can
+    /// use it to disable "Add Google account" instead of offering a flow that cannot
+    /// finish. The probe value is a constant, never a real credential.
+    /// </remarks>
+    public bool SecretProtectionAvailable =>
+        _settingsService.Protector.TryProtect("vibemeter-protector-probe", out _);
+
+    /// <summary>
     /// Runs the interactive Google OAuth flow and, on success, persists the new account.
     /// Called from Settings → Add Google account. Returns the added email on success,
     /// null on failure/cancellation (the error is surfaced to the caller to display).
@@ -224,23 +235,39 @@ public partial class MainViewModel : ObservableObject
     {
         try
         {
+            // Checked BEFORE the browser opens. Sealing is what fails when there is
+            // no secret store, and it used to fail after a real Google consent had
+            // already been completed — walking someone through an OAuth grant that
+            // was always going to be discarded.
+            if (!SecretProtectionAvailable)
+            {
+                return ("", "This machine has no secret store VibeMeter can use, so a Google " +
+                            "refresh token cannot be saved safely and the account was not added. " +
+                            "Secret protection is currently implemented for Windows only.");
+            }
+
             var (email, refreshToken) = await GoogleOAuthFlow.RunAsync();
-            // De-dupe by email: if the account already exists, replace its token.
-            _settings.GoogleAccounts.RemoveAll(a =>
-                string.Equals(a.Email, email, StringComparison.OrdinalIgnoreCase));
 
             var account = new GoogleAccount { Email = email };
             if (!GoogleAccountProtection.Seal(account, refreshToken, _settingsService.Protector))
             {
-                // Storing it in the clear is not an option, so the account is
-                // not stored at all and the person is told why.
-                return ("", "Windows could not protect the Google refresh token for this profile, " +
-                            "so the account was not saved. This usually means a roaming or " +
-                            "temporary profile; try again on the machine's own account.");
+                // Storing it in the clear is not an option, so the account is not
+                // stored at all. Nothing has been removed at this point: the de-dupe
+                // below runs only once there is a replacement to put in place.
+                return ("", "The Google refresh token could not be protected on this machine, " +
+                            "so the account was not saved. Nothing already configured has changed.");
             }
 
-            _settings.GoogleAccounts.Add(account);
-            _settingsService.Save(_settings);
+            // De-dupe by email, now that the new account is sealed and can replace
+            // the old one. Doing this before the seal meant a failure dropped the
+            // existing account from the in-memory settings, and the next save of
+            // those settings from anywhere else persisted the deletion.
+            PersistSettings(s =>
+            {
+                s.GoogleAccounts.RemoveAll(a =>
+                    string.Equals(a.Email, email, StringComparison.OrdinalIgnoreCase));
+                s.GoogleAccounts.Add(account);
+            });
             return (email, null);
         }
         catch (Exception ex)
@@ -252,23 +279,42 @@ public partial class MainViewModel : ObservableObject
     /// <summary>Removes a configured Google account by email and persists settings.</summary>
     public void RemoveGoogleAccount(string email)
     {
-        _settings.GoogleAccounts.RemoveAll(a =>
-            string.Equals(a.Email, email, StringComparison.OrdinalIgnoreCase));
-        _settingsService.Save(_settings);
+        PersistSettings(s => s.GoogleAccounts.RemoveAll(a =>
+            string.Equals(a.Email, email, StringComparison.OrdinalIgnoreCase)));
     }
 
     /// <summary>The configured Google accounts (read-only view for the Settings UI).</summary>
     public IReadOnlyList<GoogleAccount> GetGoogleAccounts() => _settings.GoogleAccounts;
 
-    public void SaveSettings()
+    public void SaveSettings() => PersistSettings();
+
+    /// <summary>
+    /// Writes this view model's own fields, plus an optional extra mutation, without
+    /// discarding anything another part of the app has written.
+    /// </summary>
+    /// <remarks>
+    /// The file is re-read first. <c>_settings</c> is the snapshot taken when this view
+    /// model was constructed, and the settings window owns fields that are not on it —
+    /// the provider enable toggles, launch-at-login and all five publish values. Saving
+    /// the snapshot wrote those back as they were at app start, so cycling the tint or
+    /// toggling compact silently reverted them. That is the bug people report as
+    /// "it forgot my settings".
+    /// </remarks>
+    private void PersistSettings(Action<SettingsData>? alsoApply = null)
     {
-        _settings.TintIndex = TintIndex;
-        _settings.AutoRefreshEnabled = AutoRefreshEnabled;
-        _settings.RefreshIntervalSeconds = RefreshIntervalSeconds;
-        _settings.MeterStyleName = MeterStyle.ToString();
-        _settings.AlwaysOnTop = AlwaysOnTop;
-        _settings.CompactMode = CompactMode;
-        _settingsService.Save(_settings);
+        var settings = _settingsService.Load();
+
+        settings.TintIndex = TintIndex;
+        settings.AutoRefreshEnabled = AutoRefreshEnabled;
+        settings.RefreshIntervalSeconds = RefreshIntervalSeconds;
+        settings.MeterStyleName = MeterStyle.ToString();
+        settings.AlwaysOnTop = AlwaysOnTop;
+        settings.CompactMode = CompactMode;
+
+        alsoApply?.Invoke(settings);
+
+        _settingsService.Save(settings);
+        _settings = settings;
     }
 
     /// <summary>

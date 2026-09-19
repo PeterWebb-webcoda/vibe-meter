@@ -24,11 +24,17 @@ namespace VibeMeter.Ui.Services;
 /// </remarks>
 public class SettingsService
 {
-    private static readonly string SettingsDirectory =
+    private static readonly string DefaultSettingsDirectory =
         Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "VibeMeter");
 
-    private static readonly string SettingsFilePath =
-        Path.Combine(SettingsDirectory, "settings.json");
+    /// <summary>
+    /// Where this instance reads and writes. Per-instance rather than static so a test
+    /// can point one at a temporary directory: the view models were moved into this
+    /// project precisely so they could be exercised, and they cannot be while every
+    /// instance shares one path under the real profile.
+    /// </summary>
+    private readonly string _settingsDirectory;
+    private readonly string _settingsFilePath;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -45,7 +51,15 @@ public class SettingsService
     public SettingsService() : this(DpapiSecretProtector.Instance) { }
 
     /// <summary>Testable constructor.</summary>
-    public SettingsService(ISecretProtector protector) => Protector = protector;
+    public SettingsService(ISecretProtector protector, string? settingsDirectory = null)
+    {
+        Protector = protector;
+        _settingsDirectory = settingsDirectory ?? DefaultSettingsDirectory;
+        _settingsFilePath = Path.Combine(_settingsDirectory, "settings.json");
+    }
+
+    /// <summary>The file this instance persists to, exposed so a test can inspect it.</summary>
+    public string SettingsFilePath => _settingsFilePath;
 
     /// <summary>Returns defaults when the file is missing or unreadable.</summary>
     public SettingsData Load()
@@ -53,12 +67,12 @@ public class SettingsService
         SettingsData data;
         try
         {
-            if (!File.Exists(SettingsFilePath))
+            if (!File.Exists(_settingsFilePath))
             {
                 return new SettingsData();
             }
 
-            var json = File.ReadAllText(SettingsFilePath);
+            var json = File.ReadAllText(_settingsFilePath);
             data = JsonSerializer.Deserialize<SettingsData>(json, JsonOptions) ?? new SettingsData();
         }
         catch
@@ -88,8 +102,37 @@ public class SettingsService
 
     public void Save(SettingsData data)
     {
-        Directory.CreateDirectory(SettingsDirectory);
+        Directory.CreateDirectory(_settingsDirectory);
         var json = JsonSerializer.Serialize(data, JsonOptions);
-        File.WriteAllText(SettingsFilePath, json);
+        File.WriteAllText(_settingsFilePath, json);
+        RestrictToOwner();
+    }
+
+    /// <summary>
+    /// Narrows the settings file and its directory to the owning user on Unix.
+    /// </summary>
+    /// <remarks>
+    /// The defaults are 0644 in a 0755 directory, which is world-readable. No secret is
+    /// stored here — a Google refresh token is only ever written in protected form — but
+    /// the file does hold the configured Google account email list and, once publishing is
+    /// enabled, the tenant and client ids. That is not something to leave readable by every
+    /// account on a shared machine. Windows is left alone: it inherits the profile's ACL.
+    /// Failure is ignored deliberately; a settings write must not fail over a mode change.
+    /// </remarks>
+    private void RestrictToOwner()
+    {
+        if (!OperatingSystem.IsLinux() && !OperatingSystem.IsMacOS()) return;
+
+        try
+        {
+            File.SetUnixFileMode(_settingsFilePath,
+                UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            new DirectoryInfo(_settingsDirectory).UnixFileMode =
+                UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute;
+        }
+        catch
+        {
+            // Best effort: an unwritable mode is not a reason to lose the settings.
+        }
     }
 }

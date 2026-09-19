@@ -17,6 +17,9 @@ public class App : Application
     private TrayIcon? _trayIcon;
     private MainWindow? _mainWindow;
     private SettingsWindow? _settingsWindow;
+
+    /// <summary>False when this desktop hosts no system tray, so the window stands in for it.</summary>
+    private bool _trayAvailable = true;
     private MainViewModel? _mainViewModel;
     private DispatcherTimer? _refreshTimer;
     private SettingsService? _settingsService;
@@ -62,7 +65,14 @@ public class App : Application
                 Icon = AppIcon
             };
 
-            BuildTrayIcon();
+            // Whether the tray can actually show anything decides how this app behaves.
+            // With no tray AND no window AND ShowInTaskbar="False", the process would have
+            // no reachable UI at all - see TrayAvailability.
+            _trayAvailable = TrayAvailability.TrayCanBeShown();
+            if (_trayAvailable)
+            {
+                BuildTrayIcon();
+            }
 
             // Auto-refresh timer - identical policy to the WPF app.
             _refreshTimer = new DispatcherTimer(
@@ -80,7 +90,19 @@ public class App : Application
             // Opt-in publishing (no-op unless enabled in settings).
             RestartPublishing();
 
-            // Initial refresh. The app starts minimised to tray: the window is
+            if (!_trayAvailable)
+            {
+                // No tray to minimise to, so the window is the only way in - and closing it
+                // has to end the process, because OnExplicitShutdown means nothing else will.
+                // ShowTrayUnavailableNotice sets CloseExitsApp, so OnClosing lets the close
+                // through and this Closed handler actually runs. Without it the window would
+                // cancel its own close and hide into a tray that does not exist.
+                _mainWindow.ShowTrayUnavailableNotice();
+                _mainWindow.Closed += (_, _) => Quit();
+                ShowMainWindow();
+            }
+
+            // Initial refresh. With a tray, the app starts minimised to it: the window is
             // deliberately NOT shown here - the tray menu / tray click does it.
             _ = _mainViewModel.RefreshAsync();
         }
@@ -136,10 +158,32 @@ public class App : Application
     {
         if (_mainWindow is null) return;
 
-        if (_mainWindow.IsVisible)
-            _mainWindow.Hide();
+        // A minimised window still reports IsVisible == true, so testing visibility alone
+        // made a tray click on a minimised window HIDE it and need a second click to bring
+        // it back. Minimised counts as "not really on screen", same as ShowMainWindow treats it.
+        if (_mainWindow.IsVisible && _mainWindow.WindowState != WindowState.Minimized)
+            HideMainWindow();
         else
             ShowMainWindow();
+    }
+
+    /// <summary>
+    /// Hides the main window, taking any open Settings window with it.
+    /// </summary>
+    /// <remarks>
+    /// Hiding the main window on its own left Settings on screen owned by a window that
+    /// was no longer there: unsaved edits were unreachable, and the window plus its view
+    /// model stayed rooted in the lifetime's window list.
+    /// </remarks>
+    public void HideMainWindow()
+    {
+        if (_settingsWindow is { } settings)
+        {
+            settings.Close();
+            _settingsWindow = null;
+        }
+
+        _mainWindow?.Hide();
     }
 
     private void ShowMainWindow()

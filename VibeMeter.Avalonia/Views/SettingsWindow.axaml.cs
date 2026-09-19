@@ -11,6 +11,17 @@ public partial class SettingsWindow : Window
     private readonly MainViewModel? _mainViewModel;
     private bool _loading = true;
 
+    /// <summary>
+    /// Design-time only. The XAML previewer instantiates a window through the runtime
+    /// loader, which needs a public parameterless constructor; without one it cannot show
+    /// either window (AVLN3001). It only loads the XAML - the real constructor is the one
+    /// below, and nothing at runtime calls this.
+    /// </summary>
+    public SettingsWindow()
+    {
+        InitializeComponent();
+    }
+
     public SettingsWindow(SettingsViewModel viewModel, MainViewModel mainViewModel)
     {
         InitializeComponent();

@@ -10,6 +10,17 @@ public partial class MainWindow : Window
 {
     private readonly MainViewModel _viewModel;
 
+    /// <summary>
+    /// Design-time only. The XAML previewer instantiates a window through the runtime
+    /// loader, which needs a public parameterless constructor; without one it cannot show
+    /// either window (AVLN3001). It only loads the XAML - the real constructor is the one
+    /// below, and nothing at runtime calls this.
+    /// </summary>
+    public MainWindow()
+    {
+        InitializeComponent();
+    }
+
     public MainWindow(MainViewModel viewModel)
     {
         InitializeComponent();
@@ -18,20 +29,37 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
+    /// True when there is no system tray, so this window is the only way into the app
+    /// and closing it must exit rather than hide it somewhere unreachable.
+    /// </summary>
+    public bool CloseExitsApp { get; private set; }
+
+    /// <summary>
     /// Close hides to the tray instead of exiting (the app lives in the tray);
-    /// the real close is only allowed while the App is quitting.
+    /// the real close is only allowed while the App is quitting, or when there is no
+    /// tray to hide into.
     /// </summary>
     protected override void OnClosing(WindowClosingEventArgs e)
     {
-        if (Application.Current is not App { IsQuitting: true })
+        if (!CloseExitsApp && Application.Current is not App { IsQuitting: true })
         {
             e.Cancel = true;
-            Hide();
+            HideToTray();
         }
         base.OnClosing(e);
     }
 
-    private void HideButton_Click(object? sender, RoutedEventArgs e) => Hide();
+    private void HideButton_Click(object? sender, RoutedEventArgs e) => HideToTray();
+
+    /// <summary>
+    /// Hides via the App so the Settings window goes with it. Hiding this window alone
+    /// left Settings on screen with no parent, keeping it and its view model alive.
+    /// </summary>
+    private void HideToTray()
+    {
+        if (Application.Current is App app) app.HideMainWindow();
+        else Hide();
+    }
 
     private void SettingsButton_Click(object? sender, RoutedEventArgs e)
         => (Application.Current as App)?.ShowSettings();
@@ -70,4 +98,18 @@ public partial class MainWindow : Window
     /// <summary>Steps the Google card back to the previous account.</summary>
     private void PrevAccountButton_Click(object? sender, RoutedEventArgs e)
         => _viewModel.CycleGoogleAccountBack();
+
+    /// <summary>
+    /// Explains, in the window itself, that the window is only open because this desktop
+    /// has no system tray to put the icon in.
+    /// </summary>
+    public void ShowTrayUnavailableNotice()
+    {
+        CloseExitsApp = true;
+        TrayNoticeText.Text =
+            "No system tray was found on this desktop, so Vibe Meter is showing this window " +
+            "instead of a tray icon. GNOME needs the AppIndicator extension; Cinnamon, KDE " +
+            "and XFCE work as-is. Closing this window exits the app.";
+        TrayNotice.IsVisible = true;
+    }
 }

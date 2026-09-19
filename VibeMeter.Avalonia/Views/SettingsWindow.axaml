@@ -152,7 +152,7 @@
                 <Grid ColumnDefinitions="Auto,*">
                     <Button Classes="soft" Content="Refresh Now"
                             Command="{Binding RefreshCommand}" />
-                    <TextBlock Grid.Column="2" Classes="secondary"
+                    <TextBlock Grid.Column="1" Classes="secondary"
                                Text="{Binding LastUpdatedText}"
                                VerticalAlignment="Center" HorizontalAlignment="Right" />
                 </Grid>
