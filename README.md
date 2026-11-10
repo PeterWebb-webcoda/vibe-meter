@@ -89,6 +89,60 @@ desktop may not have, so the cache is written as a plain file readable by your u
 (`~/.config/VibeMeter/`). It is a credential: treat it as one. Publishing is off by default,
 and nothing is cached unless you turn it on and sign in.
 
+## Account labels
+
+When two machines publish the same provider from **different accounts** (say, a work
+Claude on a Windows PC and a personal Claude on a Linux box), give each machine an
+account label so the companion app shows them side by side instead of flipping between
+them. A label is 1–32 lowercase letters, digits and hyphens, starting with a letter
+(`^[a-z][a-z0-9-]{0,31}$`), e.g. `webcoda` or `personal`.
+
+Set a default for the machine, plus optional per-provider exceptions (e.g. default
+`webcoda`, but `codex` → `shared`). With no label configured nothing changes: the
+snapshot is byte-for-byte what it was before. An invalid label is ignored with a warning
+in the log, and that provider publishes unlabelled (or with the machine default, for an
+invalid override) — it never stops publishing.
+
+With a label, each provider object in the snapshot gains two optional fields:
+
+```json
+{ "providerId": "claude", "state": "available", "planLabel": "Claude Max 5x",
+  "gauges": [ ... ], "accountLabel": "webcoda", "accountKey": "3f9c0a1b7d2e4c58" }
+```
+
+`accountKey` is the first 16 hex characters of a salted SHA-256 over the provider id and
+the provider's own account identifier — Claude's organisation and account UUIDs from
+`~/.claude.json`, Codex's account id from `~/.codex/auth.json`, and for Google the account
+email shown on the card. Z.ai holds no account identifier, so it sends the label alone. The
+raw identifiers and emails are never sent, logged or stored, and an email is stripped from
+any published plan label (the Google card still shows it locally).
+
+**Windows (tray app).** Settings → Publish usage → **Account label**. Per-provider
+exceptions are edited in `%APPDATA%\VibeMeter\settings.json`:
+
+```json
+"PublishAccountLabel": "webcoda",
+"PublishAccountLabelOverrides": { "codex": "shared" }
+```
+
+**Linux, or any headless agent.** Set the environment variables — under systemd, in the
+unit's `EnvironmentFile` (`/etc/vibemeter/agent.env`, or `~/.config/vibemeter/agent.env`
+for the user unit; see `deploy/vibemeter-agent.env.example`), then restart the service:
+
+```ini
+VIBEMETER_ACCOUNT_LABEL=personal
+VIBEMETER_ACCOUNT_LABEL_OVERRIDES=codex=shared,google=personal
+```
+
+For the Windows agent (Scheduled Task), set the same two variables with `setx` for the task
+account. The Linux tray app (Avalonia) has the same settings field and `settings.json`
+keys as Windows, in `~/.config/VibeMeter/settings.json`.
+
+**Rollout: upgrade the API first; a labelled syncer posting to an old API is rejected with
+400 and queues.** A queued snapshot is re-offered a bounded number of times
+(`OfflineQueue.MaxRejections`) before it is discarded, so do not leave a labelled syncer
+pointed at an old API for long. An unlabelled syncer works against either API version.
+
 ## Build from source
 
 Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download).

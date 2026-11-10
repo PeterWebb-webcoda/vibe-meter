@@ -352,6 +352,8 @@ bullet per problem, and the process exits **1**.
 | `VIBEMETER_AGENT_CLIENT_ID` | no — its presence selects device-code authentication | — | If set (non-empty), `VIBEMETER_AGENT_TENANT_ID` and `VIBEMETER_AGENT_SCOPE` become required and `VIBEMETER_AGENT_TOKEN` stops being so. |
 | `VIBEMETER_AGENT_TENANT_ID` | with `VIBEMETER_AGENT_CLIENT_ID` | — | Startup abort, exit 1: `VIBEMETER_AGENT_TENANT_ID is required - set it to the Entra directory (tenant) id.` |
 | `VIBEMETER_AGENT_SCOPE` | with `VIBEMETER_AGENT_CLIENT_ID` | — | Startup abort, exit 1: `VIBEMETER_AGENT_SCOPE is required - set it to the delegated scope to request, e.g. api://<api-app-id>/Usage.Write.` |
+| `VIBEMETER_ACCOUNT_LABEL` | no | — (no account fields sent) | This machine's account label, e.g. `personal`. Must match `^[a-z][a-z0-9-]{0,31}$`; an invalid value is **ignored with a warning** in the log and the agent publishes unlabelled — never an abort. See the README's "Account labels". |
+| `VIBEMETER_ACCOUNT_LABEL_OVERRIDES` | no | — | Per-provider labels, `provider=label` pairs separated by `,` or `;`, e.g. `codex=shared`. An invalid entry is ignored with a warning and that provider falls back to `VIBEMETER_ACCOUNT_LABEL`. |
 
 The queue directory is **not** configurable: it is always
 `<user-data>\VibeMeter\VibeMeter.Agent\offline-queue` (see §5).

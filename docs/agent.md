@@ -14,9 +14,12 @@ below decides which cycles are worth writing.
 | `VIBEMETER_AGENT_TOKEN` | yes | — | Bearer token for the collection API. Read fresh for every publish; never logged or written to disk. |
 | `VIBEMETER_AGENT_INTERVAL_SECONDS` | no | `300` | Seconds between publish cycles. Minimum 10. |
 | `VIBEMETER_AGENT_STALENESS_MINUTES` | no | `20` | How old a provider's **underlying data** may be before the agent omits it from the snapshot. Minimum 1. See below. |
+| `VIBEMETER_ACCOUNT_LABEL` | no | — | Account label published with each provider (`^[a-z][a-z0-9-]{0,31}$`). Unset sends no account fields. See the README's "Account labels". |
+| `VIBEMETER_ACCOUNT_LABEL_OVERRIDES` | no | — | Per-provider labels, e.g. `codex=shared,google=personal`. |
 
 Invalid values fail fast at startup with one aggregated message naming every
-problem.
+problem — except an invalid account label, which is ignored with a logged
+warning so a typo never stops publishing.
 
 ## Freshness gating (why a provider can be missing from a snapshot)
 
