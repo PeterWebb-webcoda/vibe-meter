@@ -156,7 +156,8 @@ public sealed class CodexProvider : IUsageProvider
             ResetCredits = resetCredits,
             Gauges = gauges,
             ErrorMessage = errorMessage,
-            ExtensionData = costData
+            ExtensionData = costData,
+            AccountKey = await _auth.GetAccountKeyAsync()
         };
     }
 

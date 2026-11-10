@@ -33,6 +33,28 @@ public sealed partial class SnapshotMapper
     [GeneratedRegex("[^a-z0-9._-]")]
     private static partial Regex InvalidIdentifierCharacters();
 
+    // Deliberately broad: anything shaped like local@domain.tld. Over-matching a plan label
+    // costs a word of display text; under-matching puts a person's address on the server.
+    [GeneratedRegex(@"[A-Za-z0-9._%+'-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+")]
+    private static partial Regex EmailAddress();
+
+    // Separators left dangling once an email is cut out of "Tier — email".
+    private static readonly char[] LabelSeparators = [' ', '—', '–', '-', '|', '·', ',', ':', '(', ')', '[', ']', '<', '>'];
+
+    private readonly AccountLabels _accountLabels;
+
+    /// <summary>A mapper that publishes no account labels: the pre-account-split document.</summary>
+    public SnapshotMapper() : this(null) { }
+
+    /// <param name="accountLabels">
+    /// Which account label to publish per provider; null or <see cref="AccountLabels.None"/>
+    /// emits no account fields at all.
+    /// </param>
+    public SnapshotMapper(AccountLabels? accountLabels)
+    {
+        _accountLabels = accountLabels ?? AccountLabels.None;
+    }
+
     /// <summary>
     /// Maps a cycle's provider results onto the wire contract.
     /// <paramref name="observedAt"/> must be <see cref="DateTimeOffset.UtcNow"/>
@@ -77,11 +99,19 @@ public sealed partial class SnapshotMapper
                 continue;
             }
 
+            // No email address leaves the machine in a plan label. The Google provider puts
+            // the account's address there for the card; the card keeps it, the wire does not.
+            var planLabel = StripEmails(usage.PlanLabel, out var strippedEmail);
+
+            var (accountLabel, accountKey) = MapAccount(usage, providerId, strippedEmail, warnings);
+
             providers.Add(new ProviderSnapshot(
                 providerId,
                 MapState(usage.State),
-                CleanText(usage.PlanLabel, MaxPlanLabelLength),
-                MapGauges(usage.Gauges, providerId, observedAt, warnings)));
+                CleanText(planLabel, MaxPlanLabelLength),
+                MapGauges(usage.Gauges, providerId, observedAt, warnings),
+                accountLabel,
+                accountKey));
         }
 
         var request = new SnapshotRequest(SnapshotRequest.CurrentSchemaVersion, observedAt, providers);
@@ -89,6 +119,67 @@ public sealed partial class SnapshotMapper
             request,
             JsonSerializer.Serialize(request, SnapshotJson.Options),
             warnings);
+    }
+
+    /// <summary>
+    /// Decides the (accountLabel, accountKey) pair for one provider. Both are null — and so
+    /// absent from the JSON — unless a label is configured for the provider: the key is
+    /// never sent on its own. The key is the provider's own, or failing that one derived
+    /// from an email the plan label carried (Google's only account identifier); with
+    /// neither, the label goes alone and the API keys the account by the label.
+    /// </summary>
+    private (string? Label, string? Key) MapAccount(
+        ProviderUsage usage,
+        string providerId,
+        string? strippedEmail,
+        List<string> warnings)
+    {
+        var label = _accountLabels.For(providerId);
+        if (label is null)
+        {
+            return (null, null);
+        }
+
+        var key = usage.AccountKey;
+        if (key is not null && !AccountKey.IsValid(key))
+        {
+            // Never quote the value: it is meant to be a hash, but a provider bug could
+            // have put something rawer here.
+            warnings.Add($"Provider '{providerId}' reported a malformed account key; publishing its account label without one.");
+            key = null;
+        }
+
+        key ??= strippedEmail is null ? null : AccountKey.Derive(providerId, strippedEmail);
+        return (label, key);
+    }
+
+    /// <summary>
+    /// Removes every email address from a plan label, tidying the separator it leaves
+    /// behind (<c>"Gemini Pro — someone@example.com"</c> becomes <c>"Gemini Pro"</c>).
+    /// <paramref name="firstEmail"/> receives the first address removed, so it can be
+    /// HASHED into an account key; it must not be stored or logged.
+    /// </summary>
+    internal static string? StripEmails(string? label, out string? firstEmail)
+    {
+        firstEmail = null;
+        if (string.IsNullOrEmpty(label))
+        {
+            return label;
+        }
+
+        var match = EmailAddress().Match(label);
+        if (!match.Success)
+        {
+            return label;
+        }
+
+        firstEmail = match.Value;
+        var kept = EmailAddress()
+            .Split(label)
+            .Select(part => part.Trim(LabelSeparators))
+            .Where(part => part.Length > 0)
+            .ToList();
+        return kept.Count == 0 ? null : string.Join(" ", kept);
     }
 
     /// <summary>

@@ -19,6 +19,8 @@ public sealed class AgentConfigRequirementTests
         AgentConfig.IntervalSecondsVariable,
         AgentConfig.TokenVariable,
         AgentConfig.StalenessMinutesVariable,
+        AgentConfig.AccountLabelVariable,
+        AgentConfig.AccountLabelOverridesVariable,
     ];
 
     [Fact]
@@ -74,6 +76,38 @@ public sealed class AgentConfigRequirementTests
             new Dictionary<string, string?> { [AgentConfig.IntervalSecondsVariable] = "whenever" },
             () => Assert.Throws<AgentConfigException>(
                 () => AgentConfig.FromEnvironment(requireApiBaseUrl: false, requireToken: false)));
+    }
+
+    [Fact]
+    public void AccountLabels_AreReadFromTheEnvironment_AndAnInvalidOneIsIgnoredNotFatal()
+    {
+        WithVariables(
+            new Dictionary<string, string?>
+            {
+                [AgentConfig.AccountLabelVariable] = "personal",
+                [AgentConfig.AccountLabelOverridesVariable] = "codex=shared, google=Not Valid",
+            },
+            () =>
+            {
+                var config = AgentConfig.FromEnvironment(requireApiBaseUrl: false, requireToken: false);
+
+                Assert.Equal("personal", config.AccountLabels.For("claude"));
+                Assert.Equal("shared", config.AccountLabels.For("codex"));
+                Assert.Equal("personal", config.AccountLabels.For("google"));
+                Assert.Single(config.AccountLabels.Warnings);
+            });
+    }
+
+    [Fact]
+    public void AccountLabels_Unset_AreNone()
+    {
+        WithVariables([], () =>
+        {
+            var config = AgentConfig.FromEnvironment(requireApiBaseUrl: false, requireToken: false);
+
+            Assert.Null(config.AccountLabels.For("claude"));
+            Assert.Empty(config.AccountLabels.Warnings);
+        });
     }
 
     /// <summary>Clears every VIBEMETER_* variable, applies the given overrides,

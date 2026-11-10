@@ -23,13 +23,16 @@ public sealed class CodexAuth
     {
         [JsonPropertyName("access_token")]
         public string? AccessToken { get; set; }
+
+        /// <summary>The ChatGPT account id. An identifier, not a secret; only ever hashed.</summary>
+        [JsonPropertyName("account_id")]
+        public string? AccountId { get; set; }
     }
 
     /// <summary>Returns the access token, or null when not signed in on this PC.</summary>
     public async Task<string?> GetAccessTokenAsync()
     {
-        string homePath = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
-        string authFilePath = Path.Combine(homePath, ".codex", "auth.json");
+        string authFilePath = AuthFilePath;
 
         if (!File.Exists(authFilePath))
         {
@@ -40,6 +43,34 @@ public sealed class CodexAuth
         var authFile = await JsonSerializer.DeserializeAsync<CodexAuthFile>(stream);
 
         return authFile?.Tokens?.AccessToken?.Trim();
+    }
+
+    /// <summary>
+    /// The account key for the signed-in Codex (ChatGPT) account, derived from
+    /// <c>tokens.account_id</c>, or null when the file or the field is absent. The raw id is
+    /// hashed here and never returned.
+    /// </summary>
+    /// <remarks>Never throws: losing the key costs only the account split, never the reading.</remarks>
+    public Task<string?> GetAccountKeyAsync() => ReadAccountKeyAsync(AuthFilePath);
+
+    /// <summary>Reads a named auth file rather than this machine's. Internal for tests.</summary>
+    internal static async Task<string?> ReadAccountKeyAsync(string path)
+    {
+        try
+        {
+            if (!File.Exists(path))
+            {
+                return null;
+            }
+
+            await using var stream = File.OpenRead(path);
+            var authFile = await JsonSerializer.DeserializeAsync<CodexAuthFile>(stream);
+            return VibeMeter.Core.AccountKey.Derive("codex", authFile?.Tokens?.AccountId);
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>

@@ -22,12 +22,24 @@ public sealed record SnapshotRequest(
     public const int CurrentSchemaVersion = 1;
 }
 
+/// <param name="AccountLabel">
+/// The user's name for the provider account (<c>^[a-z][a-z0-9-]{0,31}$</c>). OMITTED from
+/// the JSON when null — unlike every other field, which serialises its nulls — because the
+/// API in service before the account split rejects unknown members, and an unlabelled
+/// syncer must keep working against it.
+/// </param>
+/// <param name="AccountKey">
+/// A non-reversible key for the provider account (16 lowercase hex), sent only alongside
+/// <paramref name="AccountLabel"/>. Omitted when null, for the same reason.
+/// </param>
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record ProviderSnapshot(
     string? ProviderId,
     string? State,
     string? PlanLabel,
-    IReadOnlyList<GaugeSnapshot>? Gauges);
+    IReadOnlyList<GaugeSnapshot>? Gauges,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? AccountLabel = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? AccountKey = null);
 
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record GaugeSnapshot(
@@ -50,7 +62,8 @@ public sealed record MappedSnapshot(
 
 /// <summary>
 /// The one serialiser used for the wire document. It must stay deterministic —
-/// camelCase, no indentation, nulls included — because a re-serialised
+/// camelCase, no indentation, nulls included (bar the two optional account fields on
+/// <see cref="ProviderSnapshot"/>, which are omitted when null) — because a re-serialised
 /// identical snapshot must produce byte-identical output for the
 /// payload-derived idempotency key to be stable across retries.
 /// </summary>

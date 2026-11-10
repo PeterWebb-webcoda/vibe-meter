@@ -59,9 +59,14 @@ internal static class TrayPublishing
                 settings.PublishApiBaseUrl,
                 settings.PublishClientId,
                 settings.PublishTenantId,
-                settings.PublishScope),
+                settings.PublishScope,
+                AccountLabelsFrom(settings)),
             QueueDirectory,
             TokenCacheDirectory,
             ErrorLogPublishLog.Instance,
             notifySignIn);
+
+    /// <summary>The account labels the saved settings ask for.</summary>
+    public static AccountLabels AccountLabelsFrom(SettingsData settings) =>
+        AccountLabels.Create(settings.PublishAccountLabel, settings.PublishAccountLabelOverrides);
 }

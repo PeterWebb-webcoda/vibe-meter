@@ -144,6 +144,15 @@ public sealed record CliOptions(AgentLaunchMode Mode, string? UsageError = null)
           VIBEMETER_AGENT_SCOPE              Delegated scope to request, e.g.
                                              api://<api-app-id>/Usage.Write.
                                              Required with VIBEMETER_AGENT_CLIENT_ID.
+          VIBEMETER_ACCOUNT_LABEL            Optional account label published with
+                                             every provider, e.g. webcoda or
+                                             personal (lowercase letters, digits,
+                                             hyphens; starts with a letter; max 32).
+                                             Unset: no account fields are sent.
+          VIBEMETER_ACCOUNT_LABEL_OVERRIDES  Optional per-provider labels, e.g.
+                                             codex=shared,google=personal. An
+                                             invalid label is ignored with a
+                                             warning, never fatal.
 
         Exit codes: 0 success (see the mode descriptions) · 1 runtime failure (bad
         configuration, failed cycle, nothing publishable) · 2 usage error.

@@ -195,8 +195,22 @@ public sealed class ClaudeProvider : IUsageProvider
             // fails on every cycle is indistinguishable from one that was never tried, and the
             // only visible symptom is a file's age in someone else's log line.
             SourceDiagnostic = live.Diagnostic,
+
+            // Hashed here, at the point of reading: the raw UUIDs go no further.
+            AccountKey = DeriveAccountKey(account),
         };
     }
+
+    /// <summary>
+    /// The account key for the signed-in Claude account: organisation and account UUID from
+    /// <c>.claude.json</c>'s <c>oauthAccount</c> block. Null without an account UUID — a
+    /// desktop-only machine has no <c>.claude.json</c>, and an organisation alone does not
+    /// identify a person.
+    /// </summary>
+    internal static string? DeriveAccountKey(ClaudeOAuthAccount? account) =>
+        string.IsNullOrWhiteSpace(account?.AccountUuid)
+            ? null
+            : VibeMeter.Core.AccountKey.Derive("claude", account.OrganizationUuid, account.AccountUuid);
 
     /// <summary>
     /// What one attempt at the live source produced.

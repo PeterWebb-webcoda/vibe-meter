@@ -54,6 +54,20 @@ public class SettingsData
     public string PublishScope { get; set; } = "";
 
     /// <summary>
+    /// This machine's account label for publishing, e.g. <c>webcoda</c> or <c>personal</c>:
+    /// lowercase letters, digits and hyphens, starting with a letter, at most 32. Blank
+    /// publishes no label (the default). Lets the companion app keep two accounts of one
+    /// provider - a work Claude here, a personal one elsewhere - apart.
+    /// </summary>
+    public string PublishAccountLabel { get; set; } = "";
+
+    /// <summary>
+    /// Per-provider exceptions to <see cref="PublishAccountLabel"/>, keyed by provider id,
+    /// e.g. <c>{ "codex": "shared" }</c>. Edited in settings.json only.
+    /// </summary>
+    public Dictionary<string, string> PublishAccountLabelOverrides { get; set; } = new();
+
+    /// <summary>
     /// VibeMeter-owned Google accounts (email + OAuth refresh token), added via the
     /// in-app "Add account" flow. The Google card's carousel shows these <i>plus</i> the
     /// account the Antigravity IDE is signed into (auto-detected at runtime and de-duped

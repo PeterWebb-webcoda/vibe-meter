@@ -207,6 +207,11 @@
                 <TextBlock Classes="secondary" FontSize="11" Text="Delegated scope" />
                 <TextBox Text="{Binding PublishScope}" />
 
+                <TextBlock Classes="secondary" FontSize="11" Text="Account label (optional, e.g. webcoda or personal)" />
+                <TextBox Text="{Binding PublishAccountLabel}" />
+                <TextBlock Classes="secondary" FontSize="11" Margin="0,0,0,6" TextWrapping="Wrap"
+                           Text="Names the accounts this machine is signed in to, so the mobile app keeps them apart from another machine's. Lowercase letters, digits and hyphens. Per-provider exceptions go in settings.json (PublishAccountLabelOverrides)." />
+
                 <TextBlock Classes="secondary" FontSize="11" Margin="0,0,0,6" TextWrapping="Wrap"
                            Text="Signing in uses a device code: the first publish shows a short code in the error log (Avalonia has no tray balloon), which you enter on another device or in a browser. Nothing blocks while you do." />
 

@@ -138,6 +138,18 @@ public sealed class ProviderUsage
     /// </remarks>
     public string? SourceDiagnostic { get; init; }
 
+    /// <summary>
+    /// A stable, non-reversible key for the provider ACCOUNT these figures belong to, from
+    /// <see cref="VibeMeter.Core.AccountKey.Derive"/>; <see langword="null"/> when the provider holds no
+    /// stable account identifier.
+    /// </summary>
+    /// <remarks>
+    /// Only ever the derived hash — the raw identifier it came from is never carried on this
+    /// object. Published (as <c>accountKey</c>) only when an account label is configured for
+    /// the provider; never shown on a card.
+    /// </remarks>
+    public string? AccountKey { get; init; }
+
     /// <summary>Convenience factory for a "not yet implemented / coming soon" provider.</summary>
     public static ProviderUsage ComingSoon(string id, string displayName, string note) => new()
     {

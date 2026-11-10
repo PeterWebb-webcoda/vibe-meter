@@ -151,7 +151,7 @@ internal static class Program
         }
 
         using var publisher = new SnapshotPublisher(config.ApiBaseUrl!, tokenProvider);
-        var host = new AgentHost(config, CreateProviders(), new SnapshotMapper(), publisher, queue);
+        var host = new AgentHost(config, CreateProviders(), CreateMapper(config), publisher, queue);
 
         if (mode == AgentLaunchMode.Once)
         {
@@ -222,7 +222,7 @@ internal static class Program
         var runner = new DryRunRunner(
             config,
             CreateProviders(),
-            new SnapshotMapper(),
+            CreateMapper(config),
             new NeverPublishPublisher(),
             Console.Out);
 
@@ -249,6 +249,20 @@ internal static class Program
     /// runs more often than the policy publishes must not report failure.</summary>
     internal static int OnceExitCode(CycleOutcome outcome) =>
         outcome is CycleOutcome.Published or CycleOutcome.NothingToPublish or CycleOutcome.SkippedByPolicy ? 0 : 1;
+
+    /// <summary>
+    /// The mapper, carrying this machine's account labels. Any label that was ignored is
+    /// logged here, once per run, rather than failing startup.
+    /// </summary>
+    private static SnapshotMapper CreateMapper(AgentConfig config)
+    {
+        foreach (var warning in config.AccountLabels.Warnings)
+        {
+            AgentLog.Warn(warning);
+        }
+
+        return new SnapshotMapper(config.AccountLabels);
+    }
 
     // Same provider set the WPF app registers; each constructs parameterless
     // and reports NotConfigured itself when its local credentials are absent.

@@ -30,6 +30,9 @@ public partial class SettingsViewModel : ObservableObject
     [ObservableProperty] private string _publishTenantId = "";
     [ObservableProperty] private string _publishScope = "";
 
+    /// <summary>This machine's account label; per-provider overrides live in settings.json only.</summary>
+    [ObservableProperty] private string _publishAccountLabel = "";
+
     /// <summary>
     /// What publishing will do with the values as saved. Shown under the
     /// section, because a half-filled configuration otherwise fails silently on
@@ -82,6 +85,7 @@ public partial class SettingsViewModel : ObservableObject
         PublishClientId = settings.PublishClientId;
         PublishTenantId = settings.PublishTenantId;
         PublishScope = settings.PublishScope;
+        PublishAccountLabel = settings.PublishAccountLabel;
         UpdatePublishStatusText();
 
         ProviderToggles.Clear();
@@ -155,6 +159,7 @@ public partial class SettingsViewModel : ObservableObject
         settings.PublishClientId = PublishClientId?.Trim() ?? "";
         settings.PublishTenantId = PublishTenantId?.Trim() ?? "";
         settings.PublishScope = PublishScope?.Trim() ?? "";
+        settings.PublishAccountLabel = PublishAccountLabel?.Trim() ?? "";
 
         foreach (var toggle in ProviderToggles)
         {
@@ -188,6 +193,13 @@ public partial class SettingsViewModel : ObservableObject
         PublishStatusText = candidate.TryResolve(out _, out var problems)
             ? "On — each refresh publishes this machine's usage. You will be asked to sign in on the first publish."
             : "Not publishing yet: " + string.Join("; ", problems) + ".";
+
+        // Never a reason not to publish - an invalid label is ignored - but worth saying.
+        var label = PublishAccountLabel?.Trim();
+        if (!string.IsNullOrEmpty(label) && !VibeMeter.Publishing.AccountLabels.IsValid(label))
+        {
+            PublishStatusText += " The account label is ignored: use lowercase letters, digits and hyphens, starting with a letter (at most 32).";
+        }
     }
 
     [RelayCommand]

@@ -1,3 +1,5 @@
+using VibeMeter.Publishing;
+
 namespace VibeMeter.Agent;
 
 /// <summary>
@@ -36,10 +38,22 @@ public sealed record AgentConfig(Uri? ApiBaseUrl, TimeSpan Interval, string Queu
     public const string IntervalSecondsVariable = "VIBEMETER_AGENT_INTERVAL_SECONDS";
     public const string TokenVariable = "VIBEMETER_AGENT_TOKEN";
     public const string StalenessMinutesVariable = "VIBEMETER_AGENT_STALENESS_MINUTES";
+    public const string AccountLabelVariable = "VIBEMETER_ACCOUNT_LABEL";
+    public const string AccountLabelOverridesVariable = "VIBEMETER_ACCOUNT_LABEL_OVERRIDES";
     public const int MinimumIntervalSeconds = 10;
     public const int MinimumStalenessMinutes = 1;
     public static readonly TimeSpan DefaultInterval = TimeSpan.FromMinutes(5);
     public static readonly TimeSpan DefaultStalenessThreshold = TimeSpan.FromMinutes(20);
+
+    /// <summary>
+    /// Which account label to publish per provider, from <see cref="AccountLabelVariable"/>
+    /// (this machine's default) and <see cref="AccountLabelOverridesVariable"/>
+    /// (<c>provider=label</c> pairs, comma-separated). Unlike every other setting here an
+    /// invalid label does NOT fail startup: it is ignored, listed in
+    /// <see cref="Publishing.AccountLabels.Warnings"/> for the host to log, and the provider
+    /// publishes unlabelled — a typo in a label must never stop publishing.
+    /// </summary>
+    public AccountLabels AccountLabels { get; init; } = AccountLabels.None;
 
     /// <summary>
     /// Reads and validates configuration with the full requirements of the
@@ -134,7 +148,12 @@ public sealed record AgentConfig(Uri? ApiBaseUrl, TimeSpan Interval, string Queu
                 + Environment.NewLine + "  - " + string.Join(Environment.NewLine + "  - ", problems));
         }
 
-        return new AgentConfig(apiBaseUrl!, interval, DefaultQueueDirectory(), stalenessThreshold);
+        return new AgentConfig(apiBaseUrl!, interval, DefaultQueueDirectory(), stalenessThreshold)
+        {
+            AccountLabels = AccountLabels.Parse(
+                Environment.GetEnvironmentVariable(AccountLabelVariable),
+                Environment.GetEnvironmentVariable(AccountLabelOverridesVariable)),
+        };
     }
 
     /// <summary>

@@ -161,6 +161,17 @@ public class ClaudeSettingsFile
 
 public class ClaudeOAuthAccount
 {
+    /// <summary>
+    /// The Anthropic account's id. An identifier, not a secret, but personal: it is hashed
+    /// into <see cref="VibeMeter.Core.ProviderUsage.AccountKey"/> and never carried further.
+    /// </summary>
+    [JsonPropertyName("accountUuid")]
+    public string? AccountUuid { get; set; }
+
+    /// <summary>The organisation the account signed in under; hashed alongside <see cref="AccountUuid"/>.</summary>
+    [JsonPropertyName("organizationUuid")]
+    public string? OrganizationUuid { get; set; }
+
     [JsonPropertyName("emailAddress")]
     public string? EmailAddress { get; set; }
 

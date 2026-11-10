@@ -16,12 +16,18 @@ namespace VibeMeter.Publishing;
 /// built: a host that is not publishing must not create an offline queue, a
 /// token cache or an HTTP client, let alone reach the network.
 /// </param>
+/// <param name="AccountLabels">
+/// Which account label to publish per provider. Optional and never a reason
+/// not to publish: an invalid label was already dropped (and is logged by
+/// <see cref="DesktopPublishHost.TryCreate"/>), and null publishes none.
+/// </param>
 public sealed record DesktopPublishSettings(
     bool Enabled,
     string? ApiBaseUrl,
     string? ClientId,
     string? TenantId,
-    string? Scope)
+    string? Scope,
+    AccountLabels? AccountLabels = null)
 {
     /// <summary>
     /// Validates the settings, reporting every problem at once rather than one
@@ -211,6 +217,14 @@ public sealed class DesktopPublishHost : IDisposable
             return null;
         }
 
+        // An invalid label is ignored, not fatal: say so once per host build
+        // (startup and each saved setting), then publish without it.
+        var accountLabels = settings.AccountLabels ?? AccountLabels.None;
+        foreach (var warning in accountLabels.Warnings)
+        {
+            log.Warn(warning);
+        }
+
         var queue = new OfflineQueue(queueDirectory);
 
         // Interactive sign-in is allowed here — unlike the daemon, this host has
@@ -225,7 +239,7 @@ public sealed class DesktopPublishHost : IDisposable
 
         return new DesktopPublishHost(
             new SnapshotPublishCycle(
-                new SnapshotComposer(new SnapshotMapper(), stalenessThreshold ?? DefaultStalenessThreshold, log),
+                new SnapshotComposer(new SnapshotMapper(accountLabels), stalenessThreshold ?? DefaultStalenessThreshold, log),
                 publisher,
                 queue,
                 log,
