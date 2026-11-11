@@ -108,7 +108,14 @@ dotnet publish VibeMeter.Agent\VibeMeter.Agent.csproj -c Release -r linux-x64 --
 # Self-contained (SC): runtime bundled, nothing to install on the target
 dotnet publish VibeMeter.Agent\VibeMeter.Agent.csproj -c Release -r win-x64   --self-contained true -o publish\agent-win-x64-sc
 dotnet publish VibeMeter.Agent\VibeMeter.Agent.csproj -c Release -r linux-x64 --self-contained true -o publish\agent-linux-x64-sc
+
+# Self-contained single file: one executable plus the native SQLite library
+dotnet publish VibeMeter.Agent\VibeMeter.Agent.csproj -c Release -r linux-x64 --self-contained true -p:PublishSingleFile=true -o publish\agent-linux-x64-single
 ```
+
+The single-file build puts `VibeMeter.Agent` and `libe_sqlite3.so` in the output
+folder; copy both. If the target already holds a two-file install like this, publish
+the same way so the service's start command and your rollback copy stay unchanged.
 
 Cross-compiling from the Windows workstation to `linux-x64` works for either
 variant — the agent is pure managed code with no native dependencies.
