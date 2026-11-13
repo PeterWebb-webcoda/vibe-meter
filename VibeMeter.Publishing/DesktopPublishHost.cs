@@ -140,6 +140,7 @@ public sealed class DesktopPublishHost : IDisposable
     private readonly SnapshotPublishCycle _cycle;
     private readonly IPublishLog _log;
     private readonly IDisposable? _publisherLifetime;
+    private readonly RemoteAccountsRefresher? _remoteAccounts;
     private readonly CancellationTokenSource _shutdown = new();
 
     /// <summary>
@@ -162,12 +163,35 @@ public sealed class DesktopPublishHost : IDisposable
     /// Anything the host must dispose with itself — in practice the
     /// <see cref="SnapshotPublisher"/> and its <c>HttpClient</c>.
     /// </param>
-    internal DesktopPublishHost(SnapshotPublishCycle cycle, IPublishLog log, IDisposable? publisherLifetime = null)
+    /// <param name="remoteAccounts">
+    /// Reads other machines' accounts back after each publish attempt, or null (the
+    /// default) to read nothing back.
+    /// </param>
+    internal DesktopPublishHost(
+        SnapshotPublishCycle cycle,
+        IPublishLog log,
+        IDisposable? publisherLifetime = null,
+        RemoteAccountsRefresher? remoteAccounts = null)
     {
         _cycle = cycle;
         _log = log;
         _publisherLifetime = publisherLifetime;
+        _remoteAccounts = remoteAccounts;
     }
+
+    /// <summary>
+    /// Raised on a thread-pool thread — never the UI thread — each time a read of other
+    /// machines' accounts succeeds, with the new selection. A subscriber that touches the
+    /// UI must marshal it itself. Anything a subscriber throws is caught and logged.
+    /// </summary>
+    /// <remarks>
+    /// Display only. These accounts never enter <see cref="Publish"/>: that takes
+    /// <c>ProviderUsage</c> reports, and a <see cref="RemoteAccount"/> is not one.
+    /// </remarks>
+    public event Action<IReadOnlyList<RemoteAccount>>? RemoteAccountsChanged;
+
+    /// <summary>The latest selection of other machines' accounts; empty when none has been read.</summary>
+    public IReadOnlyList<RemoteAccount> RemoteAccounts => _remoteAccounts?.Current ?? [];
 
     /// <summary>
     /// Builds the host, or returns <see langword="null"/> when this machine is
@@ -193,13 +217,19 @@ public sealed class DesktopPublishHost : IDisposable
     /// token, so it is safe to display — see
     /// <see cref="DeviceCodeAccessTokenProvider"/>.
     /// </param>
+    /// <param name="readRemoteAccounts">
+    /// Also read other machines' accounts back from the API after each publish attempt
+    /// (throttled — see <see cref="RemoteAccountsRefresher"/>), for a host that displays
+    /// them. Off by default, so a host that shows nothing asks for nothing.
+    /// </param>
     public static DesktopPublishHost? TryCreate(
         DesktopPublishSettings settings,
         string queueDirectory,
         string tokenCacheDirectory,
         IPublishLog log,
         Action<string> notifySignIn,
-        TimeSpan? stalenessThreshold = null)
+        TimeSpan? stalenessThreshold = null,
+        bool readRemoteAccounts = false)
     {
         // The opt-in, checked before anything is constructed: a host that is
         // switched off leaves no queue directory, no token cache and no socket
@@ -237,6 +267,10 @@ public sealed class DesktopPublishHost : IDisposable
 
         var publisher = new SnapshotPublisher(apiBaseUrl, tokens);
 
+        // The read-back never prompts for a sign-in: it borrows whatever token the
+        // publisher has already established and otherwise waits for a later cycle.
+        var reader = readRemoteAccounts ? new RemoteAccountsReader(apiBaseUrl, tokens.SilentOnly()) : null;
+
         return new DesktopPublishHost(
             new SnapshotPublishCycle(
                 new SnapshotComposer(new SnapshotMapper(accountLabels), stalenessThreshold ?? DefaultStalenessThreshold, log),
@@ -245,7 +279,20 @@ public sealed class DesktopPublishHost : IDisposable
                 log,
                 CreatePolicyFor(queue)),
             log,
-            publisher);
+            reader is null ? publisher : new Lifetimes(publisher, reader),
+            reader is null ? null : new RemoteAccountsRefresher(reader, accountLabels, log));
+    }
+
+    /// <summary>Disposes several things as one, in order.</summary>
+    private sealed class Lifetimes(params IDisposable[] owned) : IDisposable
+    {
+        public void Dispose()
+        {
+            foreach (var item in owned)
+            {
+                item.Dispose();
+            }
+        }
     }
 
     /// <summary>
@@ -412,6 +459,37 @@ public sealed class DesktopPublishHost : IDisposable
             // unanticipated — which is precisely what must not be allowed to
             // travel back up into a UI refresh.
             _log.Error($"Publishing failed unexpectedly: {ex.Message}");
+        }
+
+        await RefreshRemoteAccountsAsync().ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Reads other machines' accounts back, if this host was asked to and a read is due.
+    /// Runs AFTER the publish attempt, whatever its outcome, so it can never delay or
+    /// alter what this machine sends — and nothing it reads flows back into a snapshot.
+    /// </summary>
+    private async Task RefreshRemoteAccountsAsync()
+    {
+        if (_remoteAccounts is null || _shutdown.IsCancellationRequested)
+        {
+            return;
+        }
+
+        try
+        {
+            if (await _remoteAccounts.RefreshIfDueAsync(_shutdown.Token).ConfigureAwait(false))
+            {
+                RemoteAccountsChanged?.Invoke(_remoteAccounts.Current);
+            }
+        }
+        catch (OperationCanceledException) when (_shutdown.IsCancellationRequested)
+        {
+            // The app is closing; there is nobody left to show the accounts to.
+        }
+        catch (Exception ex)
+        {
+            _log.Error($"Reading other machines' accounts failed unexpectedly: {ex.Message}");
         }
     }
 }

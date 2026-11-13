@@ -51,7 +51,19 @@ public sealed class DeviceCodeAccessTokenProvider : IAccessTokenProvider
         _notify = notify ?? Console.WriteLine;
     }
 
-    public async Task<string> GetAccessTokenAsync(CancellationToken cancellationToken)
+    public Task<string> GetAccessTokenAsync(CancellationToken cancellationToken) =>
+        AcquireAsync(_allowInteractive, cancellationToken);
+
+    /// <summary>
+    /// A view of this provider that only ever returns a cached or silently refreshed token
+    /// and never starts a device-code sign-in, whatever this instance allows. For
+    /// secondary, read-only calls (reading other machines' accounts back) that must not
+    /// prompt anyone: if publishing has not signed in, they simply fail and wait.
+    /// Shares this instance's application and token cache.
+    /// </summary>
+    public IAccessTokenProvider SilentOnly() => new SilentView(this);
+
+    private async Task<string> AcquireAsync(bool allowInteractive, CancellationToken cancellationToken)
     {
         var application = await GetApplicationAsync().ConfigureAwait(false);
 
@@ -77,7 +89,7 @@ public sealed class DeviceCodeAccessTokenProvider : IAccessTokenProvider
             }
         }
 
-        if (!_allowInteractive)
+        if (!allowInteractive)
         {
             throw new InvalidOperationException(
                 "No usable cached credential, and interactive sign-in is disabled for the daemon. "
@@ -98,6 +110,12 @@ public sealed class DeviceCodeAccessTokenProvider : IAccessTokenProvider
             .ConfigureAwait(false);
 
         return result.AccessToken;
+    }
+
+    private sealed class SilentView(DeviceCodeAccessTokenProvider owner) : IAccessTokenProvider
+    {
+        public Task<string> GetAccessTokenAsync(CancellationToken cancellationToken) =>
+            owner.AcquireAsync(allowInteractive: false, cancellationToken);
     }
 
     private async Task<IPublicClientApplication> GetApplicationAsync()
