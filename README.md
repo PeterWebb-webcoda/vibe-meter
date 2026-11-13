@@ -143,6 +143,31 @@ keys as Windows, in `~/.config/VibeMeter/settings.json`.
 (`OfflineQueue.MaxRejections`) before it is discarded, so do not leave a labelled syncer
 pointed at an old API for long. An unlabelled syncer works against either API version.
 
+### Other machines' accounts in the Windows tray app
+
+When publishing is switched on and configured, the Windows tray app also reads back the
+accounts your other machines publish and shows each one as an extra, read-only card after
+the local card of the same provider: e.g. `Claude Code · Personal`, with the same gauges
+and a note such as `From another machine · observed 4 min ago`.
+
+- **Which accounts.** Only labelled accounts whose label differs from the one this machine
+  publishes for that provider. Unlabelled accounts are never shown, and a provider this
+  machine publishes **without** a label shows no other accounts at all, since it cannot
+  tell which one is its own. Accounts the other machine reports as disabled or not
+  configured are skipped. Claude only for now (`RemoteAccountSelection.SupportedProviders`).
+- **How often.** No extra timer: the read runs after a publish attempt, at most once every
+  5 minutes, using the publisher's existing sign-in silently (it never prompts). A failure
+  keeps the last cards and backs off (10, 20, 40 min, then hourly).
+- **Age.** A reading observed more than 20 minutes ago is dimmed and marked
+  `last seen 2 h ago`; one older than 24 hours is not shown.
+- **Display only.** These cards are never published back from this machine, and they take
+  no part in costs, the compact bar or the tray icon.
+
+**Requires the API to offer `GET /api/v1/ai-usage/accounts`** (the same `Usage.Write`
+token as publishing). Against an older API the request returns 404, nothing is shown, and
+the tray app asks again only once an hour. The headless agent and the Linux (Avalonia)
+tray app do not read accounts back.
+
 ## Build from source
 
 Requires the [.NET 10 SDK](https://dotnet.microsoft.com/download).
