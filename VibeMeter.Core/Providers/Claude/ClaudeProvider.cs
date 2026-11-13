@@ -48,6 +48,9 @@ public sealed class ClaudeProvider : IUsageProvider
     /// </summary>
     private readonly ClaudeLiveSourceBackoff _liveBackoff = new();
 
+    /// <summary>The account behind the stored token, asked once per token.</summary>
+    private readonly ClaudeTokenAccountKey _tokenAccountKey = new();
+
     private static Task<ClaudeCostDetailsData?>? _costTask;
     private static ClaudeCostDetailsData? _lastCostData;
 
@@ -99,6 +102,14 @@ public sealed class ClaudeProvider : IUsageProvider
         //    on another program having run recently, so it outranks both files — unless a
         //    recent failure says to leave it alone for now (see ClaudeLiveSourceBackoff).
         var live = await TryFetchLiveAsync(_auth, _clientFactory, _liveBackoff, DateTimeOffset.Now);
+
+        // The account the token belongs to, so the key published below names the same account
+        // the live figures describe. .claude.json is the fallback: it is shared by every
+        // Claude Code process on the machine and can name a different account for a while.
+        var accountKey =
+            await _tokenAccountKey.ResolveAsync(
+                live.Credential, live.Snapshot is not null, _clientFactory, DateTimeOffset.Now)
+            ?? DeriveAccountKey(account);
 
         // 4. Merge with the local surfaces. The live reading wins when there is one;
         //    otherwise the selection is exactly what it was before this source existed —
@@ -197,7 +208,7 @@ public sealed class ClaudeProvider : IUsageProvider
             SourceDiagnostic = live.Diagnostic,
 
             // Hashed here, at the point of reading: the raw UUIDs go no further.
-            AccountKey = DeriveAccountKey(account),
+            AccountKey = accountKey,
         };
     }
 
@@ -208,9 +219,13 @@ public sealed class ClaudeProvider : IUsageProvider
     /// identify a person.
     /// </summary>
     internal static string? DeriveAccountKey(ClaudeOAuthAccount? account) =>
-        string.IsNullOrWhiteSpace(account?.AccountUuid)
+        DeriveAccountKey(account?.OrganizationUuid, account?.AccountUuid);
+
+    /// <summary>The same key from the two UUIDs, wherever they were read from.</summary>
+    internal static string? DeriveAccountKey(string? organizationUuid, string? accountUuid) =>
+        string.IsNullOrWhiteSpace(accountUuid)
             ? null
-            : VibeMeter.Core.AccountKey.Derive("claude", account.OrganizationUuid, account.AccountUuid);
+            : VibeMeter.Core.AccountKey.Derive("claude", organizationUuid, accountUuid);
 
     /// <summary>
     /// What one attempt at the live source produced.

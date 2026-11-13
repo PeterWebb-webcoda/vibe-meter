@@ -101,6 +101,9 @@ internal sealed class ClaudeApiClient : IDisposable
 {
     internal const string UsageUrl = "https://api.anthropic.com/api/oauth/usage";
 
+    /// <summary>Who the token belongs to. Read once per token; see <see cref="ClaudeTokenAccountKey"/>.</summary>
+    internal const string ProfileUrl = "https://api.anthropic.com/api/oauth/profile";
+
     /// <summary>The beta header the OAuth usage endpoint requires.</summary>
     private const string OauthBetaValue = "oauth-2025-04-20";
 
@@ -160,7 +163,7 @@ internal sealed class ClaudeApiClient : IDisposable
 
         try
         {
-            using var request = BuildRequest(token);
+            using var request = BuildRequest(token, UsageUrl);
             using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
 
             if (response.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
@@ -209,6 +212,43 @@ internal sealed class ClaudeApiClient : IDisposable
     }
 
     /// <summary>
+    /// The account key for the account that owns <paramref name="token"/>, or null when the
+    /// profile endpoint did not say. Never throws, and reports nothing: the caller falls back
+    /// to the identity on disk, so a failure here costs nothing worth a log line.
+    /// </summary>
+    /// <remarks>
+    /// Only the two UUIDs are read from the response, and they are hashed before this method
+    /// returns. The name and email address the endpoint also sends are never deserialised.
+    /// </remarks>
+    public async Task<string?> GetAccountKeyAsync(string token, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var request = BuildRequest(token, ProfileUrl);
+            using var response = await _httpClient.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            if (!response.IsSuccessStatusCode)
+            {
+                return null;
+            }
+
+            await using var stream = await response.Content.ReadAsStreamAsync(cancellationToken).ConfigureAwait(false);
+            var profile = await JsonSerializer
+                .DeserializeAsync<ClaudeProfileData>(stream, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            return ClaudeProvider.DeriveAccountKey(profile?.Organization?.Uuid, profile?.Account?.Uuid);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
     /// Reads <c>Retry-After</c> as a wait, whether the server sent seconds or an HTTP-date.
     /// Null when absent, unreadable or already in the past.
     /// </summary>
@@ -230,9 +270,9 @@ internal sealed class ClaudeApiClient : IDisposable
         return null;
     }
 
-    private static HttpRequestMessage BuildRequest(string token)
+    private static HttpRequestMessage BuildRequest(string token, string url)
     {
-        var request = new HttpRequestMessage(HttpMethod.Get, UsageUrl);
+        var request = new HttpRequestMessage(HttpMethod.Get, url);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
         request.Headers.TryAddWithoutValidation("anthropic-beta", OauthBetaValue);
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));

@@ -255,3 +255,21 @@ internal static class ClaudeJson
             : null;
     }
 }
+
+// --- /api/oauth/profile: only the two identifiers are declared, so the name and email
+// address the endpoint also returns are never read into memory as fields. ---
+
+internal sealed class ClaudeProfileData
+{
+    [JsonPropertyName("account")]
+    public ClaudeProfileRef? Account { get; set; }
+
+    [JsonPropertyName("organization")]
+    public ClaudeProfileRef? Organization { get; set; }
+}
+
+internal sealed class ClaudeProfileRef
+{
+    [JsonPropertyName("uuid")]
+    public string? Uuid { get; set; }
+}
