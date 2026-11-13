@@ -27,6 +27,16 @@ public partial class MainViewModel : ObservableObject
     private VibeMeter.Publishing.DesktopPublishHost? _publishHost;
 
     /// <summary>
+    /// The latest other-machine accounts the publish host read back, or empty. Display
+    /// only: re-rendered on each refresh so their "observed N min ago" ages, and never
+    /// handed to publishing — <see cref="PublishCollected"/> sends providers' own reports.
+    /// </summary>
+    private IReadOnlyList<VibeMeter.Publishing.RemoteAccount> _remoteAccounts = [];
+
+    /// <summary>The subscription on the current host's read-back, so it can be removed.</summary>
+    private Action<IReadOnlyList<VibeMeter.Publishing.RemoteAccount>>? _remoteAccountsHandler;
+
+    /// <summary>
     /// The UI thread this view model was created on, so background fetches
     /// can marshal each card update back to it. The WPF app constructs this
     /// view model on its dispatcher thread, where the context is the
@@ -175,6 +185,10 @@ public partial class MainViewModel : ObservableObject
         IsLoading = false;
         StatusMessage = $"Updated {DateTime.Now:t}";
         UpdateFreshnessText();
+
+        // Ages the other-machine cards (and drops any now too old to show) on the same
+        // beat as the local ones. Nothing is fetched here.
+        RenderRemoteAccounts();
 
         // Deliberately the last thing, and deliberately NOT awaited — see PublishCollected.
         PublishCollected(collected);
@@ -349,7 +363,38 @@ public partial class MainViewModel : ObservableObject
     /// host app at startup and again whenever the publishing settings
     /// are saved, so switching the feature on takes effect without a restart.
     /// </summary>
-    public void UsePublishHost(VibeMeter.Publishing.DesktopPublishHost? host) => _publishHost = host;
+    /// <remarks>
+    /// Also follows the new host's read-back of other machines' accounts. Whatever the
+    /// previous host had read is dropped: the new one may run under different account
+    /// labels, and with publishing switched off there is nothing to read with at all.
+    /// Must be called on the UI thread, as the host app does.
+    /// </remarks>
+    public void UsePublishHost(VibeMeter.Publishing.DesktopPublishHost? host)
+    {
+        if (_publishHost is not null && _remoteAccountsHandler is not null)
+        {
+            _publishHost.RemoteAccountsChanged -= _remoteAccountsHandler;
+        }
+
+        _publishHost = host;
+        _remoteAccountsHandler = null;
+        _remoteAccounts = host?.RemoteAccounts ?? [];
+
+        if (host is not null)
+        {
+            // Raised on a thread-pool thread; marshalled here. The identity check drops a
+            // late result from a host that has since been replaced.
+            _remoteAccountsHandler = accounts => OnUiThread(() =>
+            {
+                if (!ReferenceEquals(_publishHost, host)) return;
+                _remoteAccounts = accounts;
+                RenderRemoteAccounts();
+            });
+            host.RemoteAccountsChanged += _remoteAccountsHandler;
+        }
+
+        RenderRemoteAccounts();
+    }
 
     // --- Private methods ---
 
@@ -383,6 +428,28 @@ public partial class MainViewModel : ObservableObject
 
         var reported = collected.Where(usage => usage is not null).Select(usage => usage!).ToList();
         _publishHost.Publish(VibeMeter.Publishing.ProviderRoster.IncludingDisabled(reported, _registry.Providers));
+    }
+
+    /// <summary>Redraws every provider's other-machine cards from <see cref="_remoteAccounts"/>.</summary>
+    private void RenderRemoteAccounts()
+    {
+        var now = DateTimeOffset.UtcNow;
+        foreach (var card in Providers)
+        {
+            card.ShowRemoteAccounts(_remoteAccounts, now);
+        }
+    }
+
+    private void OnUiThread(Action action)
+    {
+        if (_uiContext is null)
+        {
+            action();
+        }
+        else
+        {
+            _uiContext.Post(_ => action(), null);
+        }
     }
 
     private void ApplySettings(SettingsData settings)

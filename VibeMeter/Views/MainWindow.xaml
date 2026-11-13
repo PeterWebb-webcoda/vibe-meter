@@ -234,240 +234,292 @@
                     <ItemsControl ItemsSource="{Binding Providers}">
                         <ItemsControl.ItemTemplate>
                             <DataTemplate DataType="{x:Type vm:ProviderViewModel}">
-                                <Border CornerRadius="12" Background="#18FFFFFF"
-                                        Padding="14" Margin="0,0,0,12">
+                                <StackPanel>
+                                    <Border CornerRadius="12" Background="#18FFFFFF"
+                                            Padding="14" Margin="0,0,0,12">
 
-                                    <StackPanel>
-                                        <!-- Card header -->
-                                        <DockPanel Margin="0,0,0,10">
-                                            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
-                                                <Ellipse Width="10" Height="10"
-                                                         Fill="{Binding Accent, Converter={StaticResource RgbToBrush}}" Margin="0,0,8,0"/>
-                                                <TextBlock Text="{Binding DisplayName}"
-                                                           FontSize="15" FontWeight="SemiBold"
-                                                           Foreground="{StaticResource PrimaryText}"/>
-                                            </StackPanel>
-
-                                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
-                                                <!-- Plan badge -->
-                                                <Border Background="#20FFFFFF" CornerRadius="10" Padding="8,2" Margin="0,0,8,0">
-                                                    <Border.Style>
-                                                        <Style TargetType="Border">
-                                                            <Setter Property="Visibility" Value="Visible"/>
-                                                            <Style.Triggers>
-                                                                <DataTrigger Binding="{Binding PlanLabel}" Value="{x:Null}">
-                                                                    <Setter Property="Visibility" Value="Collapsed"/>
-                                                                </DataTrigger>
-                                                                <DataTrigger Binding="{Binding PlanLabel}" Value="">
-                                                                    <Setter Property="Visibility" Value="Collapsed"/>
-                                                                </DataTrigger>
-                                                            </Style.Triggers>
-                                                        </Style>
-                                                    </Border.Style>
-                                                    <TextBlock Text="{Binding PlanLabel}" FontSize="10"
+                                        <StackPanel>
+                                            <!-- Card header -->
+                                            <DockPanel Margin="0,0,0,10">
+                                                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <Ellipse Width="10" Height="10"
+                                                             Fill="{Binding Accent, Converter={StaticResource RgbToBrush}}" Margin="0,0,8,0"/>
+                                                    <TextBlock Text="{Binding DisplayName}"
+                                                               FontSize="15" FontWeight="SemiBold"
                                                                Foreground="{StaticResource PrimaryText}"/>
-                                                </Border>
-
-                                                <!-- Available-credits badge -->
-                                                <Border Background="#3040C873" CornerRadius="10" Padding="8,2"
-                                                        Visibility="{Binding ShowResetBank, Converter={StaticResource BoolToVis}}"
-                                                        ToolTip="{Binding ResetCreditsTooltip}"
-                                                        Cursor="Hand">
-                                                    <StackPanel Orientation="Horizontal">
-                                                        <TextBlock Text="{Binding AvailableCount}" FontSize="10"
-                                                                   Foreground="#40C873" FontWeight="SemiBold"/>
-                                                        <TextBlock Text=" available" FontSize="10" Foreground="#40C873"/>
-                                                    </StackPanel>
-                                                </Border>
-
-                                                <!-- Account carousel (Google multi-account): ‹ 1/2 › -->
-                                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,0,0"
-                                                            Visibility="{Binding ShowAccountSwitcher, Converter={StaticResource BoolToVis}}">
-                                                    <StackPanel.Resources>
-                                                        <Style x:Key="CarouselArrow" TargetType="Button">
-                                                            <Setter Property="Background" Value="Transparent"/>
-                                                            <Setter Property="BorderBrush" Value="#38FFFFFF"/>
-                                                            <Setter Property="BorderThickness" Value="1"/>
-                                                            <Setter Property="Foreground" Value="{StaticResource PrimaryText}"/>
-                                                            <Setter Property="Padding" Value="7,1"/>
-                                                            <Setter Property="Cursor" Value="Hand"/>
-                                                            <Setter Property="Template">
-                                                                <Setter.Value>
-                                                                    <ControlTemplate TargetType="Button">
-                                                                        <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
-                                                                                BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="9">
-                                                                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" Margin="{TemplateBinding Padding}"/>
-                                                                        </Border>
-                                                                        <ControlTemplate.Triggers>
-                                                                            <Trigger Property="IsMouseOver" Value="True">
-                                                                                <Setter Property="Background" Value="#30FFFFFF"/>
-                                                                            </Trigger>
-                                                                        </ControlTemplate.Triggers>
-                                                                    </ControlTemplate>
-                                                                </Setter.Value>
-                                                            </Setter>
-                                                        </Style>
-                                                    </StackPanel.Resources>
-
-                                                    <Button Style="{StaticResource CarouselArrow}"
-                                                            Click="PrevAccountButton_Click"
-                                                            ToolTip="Previous Google account">
-                                                        <TextBlock Text="‹" FontSize="12" FontWeight="SemiBold"/>
-                                                    </Button>
-
-                                                    <TextBlock Text="{Binding AccountPositionText}" FontSize="10" Margin="6,0"
-                                                               VerticalAlignment="Center"
-                                                               Foreground="{StaticResource SecondaryText}"/>
-
-                                                    <Button Style="{StaticResource CarouselArrow}"
-                                                            Click="NextAccountButton_Click"
-                                                            ToolTip="Next Google account">
-                                                        <TextBlock Text="›" FontSize="12" FontWeight="SemiBold"/>
-                                                    </Button>
                                                 </StackPanel>
 
-                                                <!-- Details button -->
-                                                <ToggleButton Background="Transparent" BorderBrush="#38FFFFFF" BorderThickness="1"
-                                                        Foreground="{StaticResource PrimaryText}" Padding="8,2" Margin="8,0,0,0"
-                                                        Visibility="{Binding ShowDetailsButton, Converter={StaticResource BoolToVis}}"
-                                                        IsChecked="{Binding IsCostDetailsExpanded}" Cursor="Hand">
-                                                    <TextBlock Text="Cost breakdown" FontSize="10"/>
-                                                    <ToggleButton.Template>
-                                                        <ControlTemplate TargetType="ToggleButton">
-                                                            <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
-                                                                    BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="10">
-                                                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" Margin="{TemplateBinding Padding}"/>
-                                                            </Border>
-                                                            <ControlTemplate.Triggers>
-                                                                <Trigger Property="IsMouseOver" Value="True">
-                                                                    <Setter Property="Background" Value="#30FFFFFF"/>
-                                                                </Trigger>
-                                                                <Trigger Property="IsChecked" Value="True">
-                                                                    <Setter Property="Background" Value="#40FFFFFF"/>
-                                                                    <Setter Property="BorderBrush" Value="#60FFFFFF"/>
-                                                                </Trigger>
-                                                            </ControlTemplate.Triggers>
-                                                        </ControlTemplate>
-                                                    </ToggleButton.Template>
-                                                </ToggleButton>
-                                            </StackPanel>
-                                        </DockPanel>
+                                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" HorizontalAlignment="Right">
+                                                    <!-- Plan badge -->
+                                                    <Border Background="#20FFFFFF" CornerRadius="10" Padding="8,2" Margin="0,0,8,0">
+                                                        <Border.Style>
+                                                            <Style TargetType="Border">
+                                                                <Setter Property="Visibility" Value="Visible"/>
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding PlanLabel}" Value="{x:Null}">
+                                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                                    </DataTrigger>
+                                                                    <DataTrigger Binding="{Binding PlanLabel}" Value="">
+                                                                        <Setter Property="Visibility" Value="Collapsed"/>
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </Border.Style>
+                                                        <TextBlock Text="{Binding PlanLabel}" FontSize="10"
+                                                                   Foreground="{StaticResource PrimaryText}"/>
+                                                    </Border>
 
-                                        <!-- Gauges -->
-                                        <ItemsControl ItemsSource="{Binding Gauges}"
-                                                      ItemTemplateSelector="{StaticResource MeterTemplateSelector}">
-                                            <ItemsControl.ItemsPanel>
-                                                <ItemsPanelTemplate>
-                                                    <WrapPanel Orientation="Horizontal" HorizontalAlignment="Center"/>
-                                                </ItemsPanelTemplate>
-                                            </ItemsControl.ItemsPanel>
-                                        </ItemsControl>
-
-                                        <!-- Cost Panel -->
-                                        <Border Background="#10FFFFFF" CornerRadius="8" Padding="12" Margin="0,12,0,0"
-                                                Visibility="{Binding IsCostDetailsExpanded, Converter={StaticResource BoolToVis}}">
-                                            <StackPanel>
-                                                <!-- Total Costs -->
-                                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
-                                                    <TextBlock Text="💰" FontSize="18" Margin="0,0,8,0" VerticalAlignment="Center"/>
-                                                    <StackPanel VerticalAlignment="Center">
-                                                        <TextBlock Text="{Binding TodayCostText}" FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource PrimaryText}"/>
+                                                    <!-- Available-credits badge -->
+                                                    <Border Background="#3040C873" CornerRadius="10" Padding="8,2"
+                                                            Visibility="{Binding ShowResetBank, Converter={StaticResource BoolToVis}}"
+                                                            ToolTip="{Binding ResetCreditsTooltip}"
+                                                            Cursor="Hand">
                                                         <StackPanel Orientation="Horizontal">
-                                                            <TextBlock Text="{Binding WeekCostText}" FontSize="11" Foreground="{StaticResource SecondaryText}"/>
-                                                            <TextBlock Text=" • " FontSize="11" Foreground="{StaticResource SecondaryText}"/>
-                                                            <TextBlock Text="{Binding WeekTokensText}" FontSize="11" Foreground="{StaticResource SecondaryText}"/>
+                                                            <TextBlock Text="{Binding AvailableCount}" FontSize="10"
+                                                                       Foreground="#40C873" FontWeight="SemiBold"/>
+                                                            <TextBlock Text=" available" FontSize="10" Foreground="#40C873"/>
+                                                        </StackPanel>
+                                                    </Border>
+
+                                                    <!-- Account carousel (Google multi-account): ‹ 1/2 › -->
+                                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,0,0"
+                                                                Visibility="{Binding ShowAccountSwitcher, Converter={StaticResource BoolToVis}}">
+                                                        <StackPanel.Resources>
+                                                            <Style x:Key="CarouselArrow" TargetType="Button">
+                                                                <Setter Property="Background" Value="Transparent"/>
+                                                                <Setter Property="BorderBrush" Value="#38FFFFFF"/>
+                                                                <Setter Property="BorderThickness" Value="1"/>
+                                                                <Setter Property="Foreground" Value="{StaticResource PrimaryText}"/>
+                                                                <Setter Property="Padding" Value="7,1"/>
+                                                                <Setter Property="Cursor" Value="Hand"/>
+                                                                <Setter Property="Template">
+                                                                    <Setter.Value>
+                                                                        <ControlTemplate TargetType="Button">
+                                                                            <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                                                                    BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="9">
+                                                                                <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" Margin="{TemplateBinding Padding}"/>
+                                                                            </Border>
+                                                                            <ControlTemplate.Triggers>
+                                                                                <Trigger Property="IsMouseOver" Value="True">
+                                                                                    <Setter Property="Background" Value="#30FFFFFF"/>
+                                                                                </Trigger>
+                                                                            </ControlTemplate.Triggers>
+                                                                        </ControlTemplate>
+                                                                    </Setter.Value>
+                                                                </Setter>
+                                                            </Style>
+                                                        </StackPanel.Resources>
+
+                                                        <Button Style="{StaticResource CarouselArrow}"
+                                                                Click="PrevAccountButton_Click"
+                                                                ToolTip="Previous Google account">
+                                                            <TextBlock Text="‹" FontSize="12" FontWeight="SemiBold"/>
+                                                        </Button>
+
+                                                        <TextBlock Text="{Binding AccountPositionText}" FontSize="10" Margin="6,0"
+                                                                   VerticalAlignment="Center"
+                                                                   Foreground="{StaticResource SecondaryText}"/>
+
+                                                        <Button Style="{StaticResource CarouselArrow}"
+                                                                Click="NextAccountButton_Click"
+                                                                ToolTip="Next Google account">
+                                                            <TextBlock Text="›" FontSize="12" FontWeight="SemiBold"/>
+                                                        </Button>
+                                                    </StackPanel>
+
+                                                    <!-- Details button -->
+                                                    <ToggleButton Background="Transparent" BorderBrush="#38FFFFFF" BorderThickness="1"
+                                                            Foreground="{StaticResource PrimaryText}" Padding="8,2" Margin="8,0,0,0"
+                                                            Visibility="{Binding ShowDetailsButton, Converter={StaticResource BoolToVis}}"
+                                                            IsChecked="{Binding IsCostDetailsExpanded}" Cursor="Hand">
+                                                        <TextBlock Text="Cost breakdown" FontSize="10"/>
+                                                        <ToggleButton.Template>
+                                                            <ControlTemplate TargetType="ToggleButton">
+                                                                <Border Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}"
+                                                                        BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="10">
+                                                                    <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" Margin="{TemplateBinding Padding}"/>
+                                                                </Border>
+                                                                <ControlTemplate.Triggers>
+                                                                    <Trigger Property="IsMouseOver" Value="True">
+                                                                        <Setter Property="Background" Value="#30FFFFFF"/>
+                                                                    </Trigger>
+                                                                    <Trigger Property="IsChecked" Value="True">
+                                                                        <Setter Property="Background" Value="#40FFFFFF"/>
+                                                                        <Setter Property="BorderBrush" Value="#60FFFFFF"/>
+                                                                    </Trigger>
+                                                                </ControlTemplate.Triggers>
+                                                            </ControlTemplate>
+                                                        </ToggleButton.Template>
+                                                    </ToggleButton>
+                                                </StackPanel>
+                                            </DockPanel>
+
+                                            <!-- Gauges -->
+                                            <ItemsControl ItemsSource="{Binding Gauges}"
+                                                          ItemTemplateSelector="{StaticResource MeterTemplateSelector}">
+                                                <ItemsControl.ItemsPanel>
+                                                    <ItemsPanelTemplate>
+                                                        <WrapPanel Orientation="Horizontal" HorizontalAlignment="Center"/>
+                                                    </ItemsPanelTemplate>
+                                                </ItemsControl.ItemsPanel>
+                                            </ItemsControl>
+
+                                            <!-- Cost Panel -->
+                                            <Border Background="#10FFFFFF" CornerRadius="8" Padding="12" Margin="0,12,0,0"
+                                                    Visibility="{Binding IsCostDetailsExpanded, Converter={StaticResource BoolToVis}}">
+                                                <StackPanel>
+                                                    <!-- Total Costs -->
+                                                    <StackPanel Orientation="Horizontal" HorizontalAlignment="Center">
+                                                        <TextBlock Text="💰" FontSize="18" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                                        <StackPanel VerticalAlignment="Center">
+                                                            <TextBlock Text="{Binding TodayCostText}" FontSize="16" FontWeight="SemiBold" Foreground="{StaticResource PrimaryText}"/>
+                                                            <StackPanel Orientation="Horizontal">
+                                                                <TextBlock Text="{Binding WeekCostText}" FontSize="11" Foreground="{StaticResource SecondaryText}"/>
+                                                                <TextBlock Text=" • " FontSize="11" Foreground="{StaticResource SecondaryText}"/>
+                                                                <TextBlock Text="{Binding WeekTokensText}" FontSize="11" Foreground="{StaticResource SecondaryText}"/>
+                                                            </StackPanel>
                                                         </StackPanel>
                                                     </StackPanel>
+
+                                                    <!-- Model Breakdown -->
+                                                    <ItemsControl ItemsSource="{Binding CostModelBreakdowns}" Margin="0,16,0,0" Grid.IsSharedSizeScope="True">
+                                                        <ItemsControl.ItemTemplate>
+                                                            <DataTemplate>
+                                                                <Grid Margin="0,0,0,6">
+                                                                    <Grid.ColumnDefinitions>
+                                                                        <ColumnDefinition Width="Auto" SharedSizeGroup="ModelName"/>
+                                                                        <ColumnDefinition Width="*"/>
+                                                                        <ColumnDefinition Width="Auto"/>
+                                                                    </Grid.ColumnDefinitions>
+                                                                
+                                                                    <TextBlock Grid.Column="0" Text="{Binding ModelName}" FontSize="11" Foreground="{StaticResource SecondaryText}" Margin="0,0,8,0" VerticalAlignment="Center"/>
+                                                                
+                                                                    <ProgressBar Grid.Column="1" Minimum="0" Maximum="100" Value="{Binding Percentage100, Mode=OneWay}" Height="6" VerticalAlignment="Center" Margin="0,0,8,0">
+                                                                        <ProgressBar.Template>
+                                                                            <ControlTemplate TargetType="ProgressBar">
+                                                                                <Border Background="#20FFFFFF" CornerRadius="3" x:Name="PART_Track">
+                                                                                    <Border Background="{Binding DataContext.Accent, Converter={StaticResource RgbToBrush}, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CornerRadius="3" HorizontalAlignment="Left" x:Name="PART_Indicator" />
+                                                                                </Border>
+                                                                            </ControlTemplate>
+                                                                        </ProgressBar.Template>
+                                                                    </ProgressBar>
+                                                                
+                                                                    <TextBlock Grid.Column="2" Text="{Binding CostText}" FontSize="11" Foreground="{StaticResource PrimaryText}" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                                                                </Grid>
+                                                            </DataTemplate>
+                                                        </ItemsControl.ItemTemplate>
+                                                    </ItemsControl>
                                                 </StackPanel>
+                                            </Border>
 
-                                                <!-- Model Breakdown -->
-                                                <ItemsControl ItemsSource="{Binding CostModelBreakdowns}" Margin="0,16,0,0" Grid.IsSharedSizeScope="True">
-                                                    <ItemsControl.ItemTemplate>
-                                                        <DataTemplate>
-                                                            <Grid Margin="0,0,0,6">
-                                                                <Grid.ColumnDefinitions>
-                                                                    <ColumnDefinition Width="Auto" SharedSizeGroup="ModelName"/>
-                                                                    <ColumnDefinition Width="*"/>
-                                                                    <ColumnDefinition Width="Auto"/>
-                                                                </Grid.ColumnDefinitions>
-                                                                
-                                                                <TextBlock Grid.Column="0" Text="{Binding ModelName}" FontSize="11" Foreground="{StaticResource SecondaryText}" Margin="0,0,8,0" VerticalAlignment="Center"/>
-                                                                
-                                                                <ProgressBar Grid.Column="1" Minimum="0" Maximum="100" Value="{Binding Percentage100, Mode=OneWay}" Height="6" VerticalAlignment="Center" Margin="0,0,8,0">
-                                                                    <ProgressBar.Template>
-                                                                        <ControlTemplate TargetType="ProgressBar">
-                                                                            <Border Background="#20FFFFFF" CornerRadius="3" x:Name="PART_Track">
-                                                                                <Border Background="{Binding DataContext.Accent, Converter={StaticResource RgbToBrush}, RelativeSource={RelativeSource AncestorType=ItemsControl}}" CornerRadius="3" HorizontalAlignment="Left" x:Name="PART_Indicator" />
-                                                                            </Border>
-                                                                        </ControlTemplate>
-                                                                    </ProgressBar.Template>
-                                                                </ProgressBar>
-                                                                
-                                                                <TextBlock Grid.Column="2" Text="{Binding CostText}" FontSize="11" Foreground="{StaticResource PrimaryText}" FontWeight="SemiBold" VerticalAlignment="Center"/>
-                                                            </Grid>
-                                                        </DataTemplate>
-                                                    </ItemsControl.ItemTemplate>
-                                                </ItemsControl>
-                                            </StackPanel>
-                                        </Border>
+                                            <!-- Reset note -->
+                                            <TextBlock Text="{Binding ResetNote}"
+                                                       FontSize="11" Foreground="{StaticResource SecondaryText}"
+                                                       HorizontalAlignment="Center" Margin="0,8,0,0">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Visibility" Value="Visible"/>
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding ResetNote}" Value="{x:Null}">
+                                                                <Setter Property="Visibility" Value="Collapsed"/>
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
 
-                                        <!-- Reset note -->
-                                        <TextBlock Text="{Binding ResetNote}"
-                                                   FontSize="11" Foreground="{StaticResource SecondaryText}"
-                                                   HorizontalAlignment="Center" Margin="0,8,0,0">
-                                            <TextBlock.Style>
-                                                <Style TargetType="TextBlock">
-                                                    <Setter Property="Visibility" Value="Visible"/>
-                                                    <Style.Triggers>
-                                                        <DataTrigger Binding="{Binding ResetNote}" Value="{x:Null}">
-                                                            <Setter Property="Visibility" Value="Collapsed"/>
-                                                        </DataTrigger>
-                                                    </Style.Triggers>
-                                                </Style>
-                                            </TextBlock.Style>
-                                        </TextBlock>
+                                            <!-- Neutral notice: fetch succeeded but there is no usage figure to show -->
+                                            <Border Background="#20FFFFFF" CornerRadius="8" Padding="10" Margin="0,8,0,0"
+                                                    Visibility="{Binding ShowNotice, Converter={StaticResource BoolToVis}}">
+                                                <DockPanel>
+                                                    <TextBlock DockPanel.Dock="Left" Text="&#xE946;" FontFamily="Segoe MDL2 Assets"
+                                                               FontSize="13" Foreground="{StaticResource SecondaryText}"
+                                                               VerticalAlignment="Top" Margin="0,1,8,0"/>
+                                                    <TextBlock Text="{Binding Notice}" FontSize="11"
+                                                               Foreground="{StaticResource SecondaryText}" TextWrapping="Wrap"/>
+                                                </DockPanel>
+                                            </Border>
 
-                                        <!-- Neutral notice: fetch succeeded but there is no usage figure to show -->
-                                        <Border Background="#20FFFFFF" CornerRadius="8" Padding="10" Margin="0,8,0,0"
-                                                Visibility="{Binding ShowNotice, Converter={StaticResource BoolToVis}}">
-                                            <DockPanel>
-                                                <TextBlock DockPanel.Dock="Left" Text="&#xE946;" FontFamily="Segoe MDL2 Assets"
-                                                           FontSize="13" Foreground="{StaticResource SecondaryText}"
-                                                           VerticalAlignment="Top" Margin="0,1,8,0"/>
-                                                <TextBlock Text="{Binding Notice}" FontSize="11"
-                                                           Foreground="{StaticResource SecondaryText}" TextWrapping="Wrap"/>
-                                            </DockPanel>
-                                        </Border>
-
-                                        <!-- Not configured -->
-                                        <Border Background="#20FFFFFF" CornerRadius="8" Padding="10" Margin="0,8,0,0"
-                                                Visibility="{Binding ShowNotConfigured, Converter={StaticResource BoolToVis}}">
-                                            <TextBlock Text="{Binding ErrorMessage}" FontSize="11"
-                                                       Foreground="{StaticResource SecondaryText}" TextWrapping="Wrap"/>
-                                        </Border>
-
-                                        <!-- Error -->
-                                        <Border Background="#30482020" CornerRadius="8" Padding="10" Margin="0,8,0,0"
-                                                Visibility="{Binding ShowError, Converter={StaticResource BoolToVis}}">
-                                            <DockPanel>
-                                                <Button DockPanel.Dock="Right" VerticalAlignment="Top"
-                                                        Click="CopyErrorButton_Click" ToolTip="Copy error message"
-                                                        Background="Transparent" BorderBrush="#40F04840"
-                                                        BorderThickness="1" Cursor="Hand"
-                                                        Padding="6,1" Margin="8,0,0,0">
-                                                    <TextBlock Text="Copy" FontSize="10" Foreground="#F04840"/>
-                                                </Button>
+                                            <!-- Not configured -->
+                                            <Border Background="#20FFFFFF" CornerRadius="8" Padding="10" Margin="0,8,0,0"
+                                                    Visibility="{Binding ShowNotConfigured, Converter={StaticResource BoolToVis}}">
                                                 <TextBlock Text="{Binding ErrorMessage}" FontSize="11"
-                                                           Foreground="#F04840" TextWrapping="Wrap"/>
-                                            </DockPanel>
-                                        </Border>
+                                                           Foreground="{StaticResource SecondaryText}" TextWrapping="Wrap"/>
+                                            </Border>
 
-                                        <!-- Status line -->
-                                        <TextBlock Text="{Binding StatusText}"
-                                                   FontSize="10" Foreground="{StaticResource SecondaryText}"
-                                                   HorizontalAlignment="Right" Margin="0,6,0,0"/>
-                                    </StackPanel>
-                                </Border>
+                                            <!-- Error -->
+                                            <Border Background="#30482020" CornerRadius="8" Padding="10" Margin="0,8,0,0"
+                                                    Visibility="{Binding ShowError, Converter={StaticResource BoolToVis}}">
+                                                <DockPanel>
+                                                    <Button DockPanel.Dock="Right" VerticalAlignment="Top"
+                                                            Click="CopyErrorButton_Click" ToolTip="Copy error message"
+                                                            Background="Transparent" BorderBrush="#40F04840"
+                                                            BorderThickness="1" Cursor="Hand"
+                                                            Padding="6,1" Margin="8,0,0,0">
+                                                        <TextBlock Text="Copy" FontSize="10" Foreground="#F04840"/>
+                                                    </Button>
+                                                    <TextBlock Text="{Binding ErrorMessage}" FontSize="11"
+                                                               Foreground="#F04840" TextWrapping="Wrap"/>
+                                                </DockPanel>
+                                            </Border>
+
+                                            <!-- Status line -->
+                                            <TextBlock Text="{Binding StatusText}"
+                                                       FontSize="10" Foreground="{StaticResource SecondaryText}"
+                                                       HorizontalAlignment="Right" Margin="0,6,0,0"/>
+                                        </StackPanel>
+                                    </Border>
+
+                                    <!-- Other machines' accounts of this provider (read back from the collection API).
+                                         Read-only: outlined rather than filled, a hollow accent dot, and dimmed when stale. -->
+                                    <ItemsControl ItemsSource="{Binding RemoteAccounts}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate DataType="{x:Type vm:RemoteAccountViewModel}">
+                                                <Border CornerRadius="12" Background="#0CFFFFFF"
+                                                        BorderBrush="#30FFFFFF" BorderThickness="1"
+                                                        Padding="14" Margin="0,0,0,12"
+                                                        Opacity="{Binding CardOpacity}">
+                                                    <StackPanel>
+                                                        <!-- Card header -->
+                                                        <DockPanel Margin="0,0,0,10">
+                                                            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                                                                <Ellipse Width="10" Height="10" StrokeThickness="2"
+                                                                         Stroke="{Binding Accent, Converter={StaticResource RgbToBrush}}" Margin="0,0,8,0"/>
+                                                                <TextBlock Text="{Binding Title}"
+                                                                           FontSize="15" FontWeight="SemiBold"
+                                                                           Foreground="{StaticResource PrimaryText}"/>
+                                                            </StackPanel>
+
+                                                            <!-- Plan badge -->
+                                                            <Border DockPanel.Dock="Right" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                                    Background="#20FFFFFF" CornerRadius="10" Padding="8,2"
+                                                                    Visibility="{Binding HasPlanLabel, Converter={StaticResource BoolToVis}}">
+                                                                <TextBlock Text="{Binding PlanLabel}" FontSize="10"
+                                                                           Foreground="{StaticResource PrimaryText}"/>
+                                                            </Border>
+                                                        </DockPanel>
+
+                                                        <!-- Gauges: the same meters as a local card -->
+                                                        <ItemsControl ItemsSource="{Binding Gauges}"
+                                                                      ItemTemplateSelector="{StaticResource MeterTemplateSelector}">
+                                                            <ItemsControl.ItemsPanel>
+                                                                <ItemsPanelTemplate>
+                                                                    <WrapPanel Orientation="Horizontal" HorizontalAlignment="Center"/>
+                                                                </ItemsPanelTemplate>
+                                                            </ItemsControl.ItemsPanel>
+                                                        </ItemsControl>
+
+                                                        <!-- Where the reading came from, and how old it is -->
+                                                        <TextBlock Text="{Binding Note}"
+                                                                   FontSize="10" Foreground="{StaticResource SecondaryText}"
+                                                                   HorizontalAlignment="Right" Margin="0,6,0,0"
+                                                                   ToolTip="Read back from the collection API. Shown here only; this machine never publishes it."/>
+                                                    </StackPanel>
+                                                </Border>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
                     </ItemsControl>

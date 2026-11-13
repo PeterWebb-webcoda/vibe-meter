@@ -143,7 +143,9 @@ public partial class App : Application
         // the UI thread. Anything unsent is already on disk in the offline
         // queue, and the replacement host flushes it on its first publish.
         _publishHost?.Dispose();
-        _publishHost = TrayPublishing.TryStart(_settingsService.Load(), ShowSignInPrompt);
+        // This window draws other machines' accounts beside its own (read back from the
+        // API after each publish), so it asks the host to fetch them.
+        _publishHost = TrayPublishing.TryStart(_settingsService.Load(), ShowSignInPrompt, readRemoteAccounts: true);
         _mainViewModel.UsePublishHost(_publishHost);
     }
 

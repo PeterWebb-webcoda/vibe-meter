@@ -63,6 +63,16 @@ public sealed partial class ProviderViewModel : ObservableObject
     public ObservableCollection<UsageGaugeData> Gauges { get; } = new();
 
     public bool HasGauges => Gauges.Count > 0;
+
+    /// <summary>
+    /// Other machines' accounts of this provider, drawn as read-only cards after this one.
+    /// Kept apart from everything above on purpose: nothing here touches
+    /// <see cref="Gauges"/>, the compact-bar figures or the cost data, and the publish path
+    /// never reads view models at all.
+    /// </summary>
+    public ObservableCollection<RemoteAccountViewModel> RemoteAccounts { get; } = new();
+
+    public bool HasRemoteAccounts => RemoteAccounts.Count > 0;
     public bool ShowNotConfigured => State == ProviderState.NotConfigured && !HasGauges;
     public bool ShowError => State == ProviderState.Error && !HasGauges;
     public bool ShowResetBank => AvailableCount.HasValue;
@@ -129,6 +139,24 @@ public sealed partial class ProviderViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowNotice));
         OnPropertyChanged(nameof(ShowAccountSwitcher));
         OnPropertyChanged(nameof(AccountPositionText));
+    }
+
+    /// <summary>
+    /// Replaces the remote-account cards with those of <paramref name="accounts"/> that
+    /// belong to this provider and are not too old to show at <paramref name="now"/>.
+    /// </summary>
+    public void ShowRemoteAccounts(IEnumerable<VibeMeter.Publishing.RemoteAccount> accounts, DateTimeOffset now)
+    {
+        RemoteAccounts.Clear();
+        foreach (var account in accounts)
+        {
+            if (account.ProviderId == Id && RemoteAccountViewModel.From(account, DisplayName, now) is { } card)
+            {
+                RemoteAccounts.Add(card);
+            }
+        }
+
+        OnPropertyChanged(nameof(HasRemoteAccounts));
     }
 
     private void PopulateCostData(object? extensionData)

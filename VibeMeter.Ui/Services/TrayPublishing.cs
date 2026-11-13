@@ -52,7 +52,15 @@ internal static class TrayPublishing
     /// Shows the device-code message. Called from the publishing thread, so an
     /// implementation that touches the UI must marshal it itself.
     /// </param>
-    public static DesktopPublishHost? TryStart(SettingsData settings, Action<string> notifySignIn) =>
+    /// <param name="readRemoteAccounts">
+    /// Also read other machines' accounts back for display (see
+    /// <see cref="RemoteAccountsRefresher"/>). Only a host whose window draws them should
+    /// ask; today that is the Windows tray app.
+    /// </param>
+    public static DesktopPublishHost? TryStart(
+        SettingsData settings,
+        Action<string> notifySignIn,
+        bool readRemoteAccounts = false) =>
         DesktopPublishHost.TryCreate(
             new DesktopPublishSettings(
                 settings.PublishEnabled,
@@ -64,7 +72,8 @@ internal static class TrayPublishing
             QueueDirectory,
             TokenCacheDirectory,
             ErrorLogPublishLog.Instance,
-            notifySignIn);
+            notifySignIn,
+            readRemoteAccounts: readRemoteAccounts);
 
     /// <summary>The account labels the saved settings ask for.</summary>
     public static AccountLabels AccountLabelsFrom(SettingsData settings) =>
