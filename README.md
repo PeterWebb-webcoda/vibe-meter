@@ -143,9 +143,10 @@ keys as Windows, in `~/.config/VibeMeter/settings.json`.
 (`OfflineQueue.MaxRejections`) before it is discarded, so do not leave a labelled syncer
 pointed at an old API for long. An unlabelled syncer works against either API version.
 
-### Other machines' accounts in the Windows tray app
+### Other machines' accounts in the tray apps
 
-When publishing is switched on and configured, the Windows tray app also reads back the
+When publishing is switched on and configured, the tray app (Windows, and the Linux
+Avalonia app) also reads back the
 accounts your other machines publish and shows each one as an extra, read-only card after
 the local card of the same provider: e.g. `Claude Code · Personal`, with the same gauges
 and a note such as `From another machine · observed 4 min ago`.
@@ -165,8 +166,7 @@ and a note such as `From another machine · observed 4 min ago`.
 
 **Requires the API to offer `GET /api/v1/ai-usage/accounts`** (the same `Usage.Write`
 token as publishing). Against an older API the request returns 404, nothing is shown, and
-the tray app asks again only once an hour. The headless agent and the Linux (Avalonia)
-tray app do not read accounts back.
+the tray app asks again only once an hour. The headless agent does not read accounts back.
 
 ## Build from source
 

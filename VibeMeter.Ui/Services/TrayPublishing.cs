@@ -55,7 +55,8 @@ internal static class TrayPublishing
     /// <param name="readRemoteAccounts">
     /// Also read other machines' accounts back for display (see
     /// <see cref="RemoteAccountsRefresher"/>). Only a host whose window draws them should
-    /// ask; today that is the Windows tray app.
+    /// ask; today that is both tray apps (Windows WPF and Linux Avalonia). The headless
+    /// agent has no window and never asks.
     /// </param>
     public static DesktopPublishHost? TryStart(
         SettingsData settings,

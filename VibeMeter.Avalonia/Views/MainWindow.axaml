@@ -21,11 +21,57 @@
         <conv:TintIndexToBrushConverter x:Key="TintIndexToBrush" />
         <conv:TintIndexToNameConverter x:Key="TintIndexToName" />
         <conv:NonEmptyToBoolConverter x:Key="NonEmpty" />
+
+        <!-- One gauge as a horizontal bar. Shared by a provider's own card and by the
+             read-only cards for its accounts on other machines. -->
+        <DataTemplate x:Key="GaugeBarTemplate" x:DataType="models:UsageGaugeData">
+            <StackPanel Margin="0,4,0,8" ToolTip.Tip="{Binding TooltipText}">
+                <Grid Margin="0,0,0,4">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Text="{Binding Title}" FontSize="12"
+                               FontWeight="SemiBold" Foreground="White"
+                               VerticalAlignment="Center" />
+                    <TextBlock Text="{Binding Subtitle}" FontSize="10"
+                               Foreground="#B0B0C0" Margin="6,0,0,0"
+                               VerticalAlignment="Center" Grid.Column="1" />
+                    <StackPanel Grid.Column="2" Orientation="Horizontal"
+                                VerticalAlignment="Center">
+                        <TextBlock Text="{Binding ClampedPercent}" FontSize="13"
+                                   FontWeight="Bold" Foreground="White" />
+                        <TextBlock Text="%" FontSize="9" Foreground="#B0B0C0"
+                                   Margin="1,2,0,0" />
+                    </StackPanel>
+                </Grid>
+
+                <ProgressBar Classes="gauge" Minimum="0" Maximum="100"
+                             Value="{Binding ClampedPercent, Mode=OneWay}"
+                             Foreground="{Binding StatusColor, Converter={StaticResource RgbToBrush}}" />
+
+                <TextBlock Text="{Binding ResetText}" FontSize="9"
+                           Foreground="#808090" Margin="0,4,0,0"
+                           HorizontalAlignment="Right" />
+            </StackPanel>
+        </DataTemplate>
     </Window.Resources>
 
     <Window.Styles>
         <Style Selector="Border.card">
             <Setter Property="Background" Value="#18FFFFFF" />
+            <Setter Property="CornerRadius" Value="12" />
+            <Setter Property="Padding" Value="14" />
+            <Setter Property="Margin" Value="0,0,0,12" />
+        </Style>
+
+        <!-- Another machine's account: read-only, so outlined rather than filled. -->
+        <Style Selector="Border.remoteCard">
+            <Setter Property="Background" Value="#0CFFFFFF" />
+            <Setter Property="BorderBrush" Value="#30FFFFFF" />
+            <Setter Property="BorderThickness" Value="1" />
             <Setter Property="CornerRadius" Value="12" />
             <Setter Property="Padding" Value="14" />
             <Setter Property="Margin" Value="0,0,0,12" />
@@ -121,6 +167,7 @@
             <ItemsControl ItemsSource="{Binding Providers}">
                 <ItemsControl.ItemTemplate>
                     <DataTemplate x:DataType="vm:ProviderViewModel">
+                      <StackPanel>
                         <Border Classes="card">
                             <StackPanel>
 
@@ -181,43 +228,8 @@
                                 </Grid>
 
                                 <!-- Gauges: horizontal bars -->
-                                <ItemsControl ItemsSource="{Binding Gauges}">
-                                    <ItemsControl.ItemTemplate>
-                                        <DataTemplate x:DataType="models:UsageGaugeData">
-                                            <StackPanel Margin="0,4,0,8" ToolTip.Tip="{Binding TooltipText}">
-                                                <Grid Margin="0,0,0,4">
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="Auto" />
-                                                        <ColumnDefinition Width="*" />
-                                                        <ColumnDefinition Width="Auto" />
-                                                    </Grid.ColumnDefinitions>
-
-                                                    <TextBlock Text="{Binding Title}" FontSize="12"
-                                                               FontWeight="SemiBold" Foreground="White"
-                                                               VerticalAlignment="Center" />
-                                                    <TextBlock Text="{Binding Subtitle}" FontSize="10"
-                                                               Foreground="#B0B0C0" Margin="6,0,0,0"
-                                                               VerticalAlignment="Center" Grid.Column="1" />
-                                                    <StackPanel Grid.Column="2" Orientation="Horizontal"
-                                                                VerticalAlignment="Center">
-                                                        <TextBlock Text="{Binding ClampedPercent}" FontSize="13"
-                                                                   FontWeight="Bold" Foreground="White" />
-                                                        <TextBlock Text="%" FontSize="9" Foreground="#B0B0C0"
-                                                                   Margin="1,2,0,0" />
-                                                    </StackPanel>
-                                                </Grid>
-
-                                                <ProgressBar Classes="gauge" Minimum="0" Maximum="100"
-                                                             Value="{Binding ClampedPercent, Mode=OneWay}"
-                                                             Foreground="{Binding StatusColor, Converter={StaticResource RgbToBrush}}" />
-
-                                                <TextBlock Text="{Binding ResetText}" FontSize="9"
-                                                           Foreground="#808090" Margin="0,4,0,0"
-                                                           HorizontalAlignment="Right" />
-                                            </StackPanel>
-                                        </DataTemplate>
-                                    </ItemsControl.ItemTemplate>
-                                </ItemsControl>
+                                <ItemsControl ItemsSource="{Binding Gauges}"
+                                              ItemTemplate="{StaticResource GaugeBarTemplate}" />
 
                                 <!-- Cost panel -->
                                 <Border Background="#10FFFFFF" CornerRadius="8" Padding="12" Margin="0,12,0,0"
@@ -301,6 +313,46 @@
 
                             </StackPanel>
                         </Border>
+
+                        <!-- Other machines' accounts of this provider (read back from the collection API).
+                             Read-only: outlined rather than filled, a hollow accent dot, and dimmed when stale. -->
+                        <ItemsControl ItemsSource="{Binding RemoteAccounts}"
+                                      IsVisible="{Binding HasRemoteAccounts}">
+                            <ItemsControl.ItemTemplate>
+                                <DataTemplate x:DataType="vm:RemoteAccountViewModel">
+                                    <Border Classes="remoteCard" Opacity="{Binding CardOpacity}">
+                                        <StackPanel>
+
+                                            <!-- Card header -->
+                                            <Grid Margin="0,0,0,10" ColumnDefinitions="*,Auto">
+                                                <StackPanel Orientation="Horizontal" Spacing="8" VerticalAlignment="Center">
+                                                    <Ellipse Width="10" Height="10" StrokeThickness="2"
+                                                             Stroke="{Binding Accent, Converter={StaticResource RgbToBrush}}" />
+                                                    <TextBlock Text="{Binding Title}" FontSize="15"
+                                                               FontWeight="SemiBold" Foreground="White" />
+                                                </StackPanel>
+
+                                                <!-- Plan badge -->
+                                                <Border Grid.Column="1" Classes="badge"
+                                                        IsVisible="{Binding HasPlanLabel}">
+                                                    <TextBlock Text="{Binding PlanLabel}" FontSize="10" Foreground="White" />
+                                                </Border>
+                                            </Grid>
+
+                                            <!-- Gauges: the same bars as a local card -->
+                                            <ItemsControl ItemsSource="{Binding Gauges}"
+                                                          ItemTemplate="{StaticResource GaugeBarTemplate}" />
+
+                                            <!-- Where the reading came from, and how old it is -->
+                                            <TextBlock Text="{Binding Note}" FontSize="10" Foreground="#B0B0C0"
+                                                       HorizontalAlignment="Right" Margin="0,6,0,0"
+                                                       ToolTip.Tip="Read back from the collection API. Shown here only; this machine never publishes it." />
+                                        </StackPanel>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                      </StackPanel>
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>

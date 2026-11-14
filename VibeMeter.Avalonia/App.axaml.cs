@@ -288,7 +288,9 @@ public class App : Application
         if (_settingsService is null || _mainViewModel is null) return;
 
         _publishHost?.Dispose();
-        _publishHost = TrayPublishing.TryStart(_settingsService.Load(), ShowSignInPrompt);
+        // This window draws other machines' accounts beside its own (read back from the
+        // API after each publish), so it asks the host to fetch them, as the WPF App does.
+        _publishHost = TrayPublishing.TryStart(_settingsService.Load(), ShowSignInPrompt, readRemoteAccounts: true);
         _mainViewModel.UsePublishHost(_publishHost);
     }
 
